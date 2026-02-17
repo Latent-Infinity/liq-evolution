@@ -24,6 +24,9 @@ classifiers = [
 ]
 dependencies = [
     "liq-gp>=0.1.0",
+    "liq-core>=0.1.0",
+    "liq-signals>=0.1.0",
+    "liq-ta>=0.1.0",
     "numpy>=1.26",
     "polars>=0.20",
     "pydantic>=2.0",
@@ -33,14 +36,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-indicators = ["liq-ta"]
 # runner = ["liq-core", "liq-runner", "liq-signals"]  # uncomment when available
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "hypothesis>=6.0",
     "ruff>=0.14",
-    "mypy>=1.11",
     "ty>=0.0.1",
 ]
 
@@ -54,13 +55,14 @@ dev-dependencies = [
     "pytest-cov>=5.0",
     "hypothesis>=6.0",
     "ruff>=0.14",
-    "mypy>=1.11",
     "ty>=0.0.1",
 ]
 
 [tool.uv.sources]
 liq-gp = { path = "../liq-gp", editable = true }
-liq-ta = { path = "../liq-ta/crates/liq-ta-python" }
+liq-ta = { path = "../liq-ta/crates/liq-ta-python", editable = true }
+liq-core = { path = "../liq-core", editable = true }
+liq-signals = { path = "../liq-signals", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/liq"]
@@ -101,7 +103,14 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.ty.environment]
-extra-paths = ["./src"]
+extra-paths = [
+    "./src",
+    "../liq-core/src",
+    "../liq-gp/src",
+    "../liq-signals/src",
+    "../liq-ta/crates/liq-ta-python/src",
+    "../liq-store/src",
+]
 
 [tool.ty.rules]
 # Start permissive -- tighten incrementally
@@ -130,12 +139,3 @@ exclude_lines = [
     "@overload",
     "\\.\\.\\.",
 ]
-
-[tool.mypy]
-python_version = "3.12"
-warn_unused_configs = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_unreachable = true
-disallow_incomplete_defs = false
-disallow_untyped_defs = false

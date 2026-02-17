@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 
@@ -145,7 +145,7 @@ class GPSignalProvider:
                 return value.astimezone(UTC)
         return datetime.now(UTC)
 
-    def _direction_from_score(self, score: float) -> str:
+    def _direction_from_score(self, score: float) -> Literal["long", "short", "flat"]:
         if score > self.long_threshold:
             return "long"
         short_cutoff = abs(self.short_threshold)

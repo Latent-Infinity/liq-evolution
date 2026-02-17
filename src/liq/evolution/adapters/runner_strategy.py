@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import polars as pl
 
-from liq.evolution.adapters.parallel_eval import ParallelEvaluator
+from liq.evolution.adapters.parallel_eval import Evaluator, ParallelEvaluator
 from liq.evolution.adapters.signal_output import GPSignalOutput
 from liq.evolution.config import ParallelConfig
 from liq.evolution.errors import AdapterError, SerializationError
@@ -97,8 +97,11 @@ class GPStrategyAdapter:
 
         evaluator = self._evaluator
         if self._parallel_config is not None:
+            if evaluator is None:
+                raise AdapterError("Parallel evaluation requires an evaluator")
+
             evaluator = ParallelEvaluator(
-                evaluator=evaluator,
+                evaluator=cast(Evaluator, evaluator),
                 backend=self._parallel_config.backend,
                 max_workers=self._parallel_config.max_workers,
                 max_in_flight=self._parallel_config.max_in_flight,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import liq_ta
 import numpy as np
 
 from liq.evolution.protocols import IndicatorBackend
@@ -255,8 +256,6 @@ def _backend_indicators(backend: IndicatorBackend) -> dict[str, dict[str, Any]]:
         if metadata_source is not None:
             return metadata_source
 
-    import liq_ta
-
     return dict(liq_ta.INDICATORS)
 
 
@@ -273,8 +272,6 @@ def _backend_candlestick_patterns(backend: IndicatorBackend) -> list[str]:
         if patterns is not None:
             return patterns
 
-    import liq_ta
-
     return [
         name
         for name in sorted(dir(liq_ta))
@@ -290,8 +287,6 @@ class LiqTAIndicatorBackend:
     """
 
     def __init__(self) -> None:
-        import liq_ta
-
         self._liq_ta = liq_ta
         self._indicators: dict[str, dict[str, Any]] = dict(liq_ta.INDICATORS)
 
