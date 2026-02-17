@@ -7,19 +7,32 @@ and automatic fallback to sequential evaluation.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import platform
+import random
 import resource
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from math import ceil
+from typing import Any, Protocol, cast
 
 from liq.evolution.errors import AdapterError, ParallelExecutionError
 
 logger = logging.getLogger(__name__)
 
-Evaluator = Callable[[list[Any], Any], list[Any]] | Any
+class _EvaluatorProtocol(Protocol):
+    def evaluate(self, programs: list[Any], context: Any) -> list[Any]: ...
+
+
+class _EvaluatorFitnessProtocol(Protocol):
+    def evaluate_fitness(self, programs: list[Any], context: Any) -> list[Any]: ...
+
+
+Evaluator = (
+    _EvaluatorProtocol | _EvaluatorFitnessProtocol | Callable[[list[Any], Any], list[Any]]
+)
 
 
 @dataclass
@@ -117,6 +130,30 @@ class ParallelEvaluator:
         except Exception as exc:
             raise ParallelExecutionError(f"Batch evaluation failed: {exc}") from exc
 
+    def evaluate(
+        self,
+        programs: list[Any],
+        context: Any,
+        evaluator: Evaluator | None = None,
+    ) -> list[Any]:
+        """Protocol-compatible alias for :meth:`evaluate_batch`.
+
+        Parameters
+        ----------
+        programs:
+            GP programs to evaluate.
+        context:
+            Evaluation context passed through to the evaluator.
+        evaluator:
+            Optional override for this call.
+
+        Returns
+        -------
+        list[Any]
+            Fitness results for each program.
+        """
+        return self.evaluate_batch(programs, context, evaluator)
+
     def _evaluate_sequential(
         self,
         programs: list[Any],
@@ -154,13 +191,16 @@ class ParallelEvaluator:
         # Put shared context in the object store
         context_ref = ray.put(context)
 
-        # Create remote evaluation function
-        remote_eval = ray.remote(self._remote_eval_fn)
+        # Create remote evaluation function with worker recycle policy
+        remote_eval = ray.remote(
+            self._remote_eval_fn,
+            max_calls=self.max_tasks_per_worker,
+        )
 
         eval_fn = self._make_eval_fn(evaluator)
 
         # Split programs into chunks for workers
-        chunk_size = max(1, len(programs) // self.max_workers)
+        chunk_size = max(1, ceil(len(programs) / self.max_workers))
         chunks = [
             programs[i : i + chunk_size] for i in range(0, len(programs), chunk_size)
         ]
@@ -189,6 +229,14 @@ class ParallelEvaluator:
             result = ray.get(ref)
             collected.append((ref_to_idx[ref], result))
 
+        try:
+            # Explicitly release object store memory once all tasks complete.
+            ray.internal.free(context_ref)
+        except Exception:
+            # If the internal API differs, fallback to the public API.
+            with contextlib.suppress(Exception):
+                ray.free(context_ref)
+
         # Sort by original chunk index and flatten
         collected.sort(key=lambda pair: pair[0])
         return [item for _, chunk_result in collected for item in chunk_result]
@@ -201,6 +249,11 @@ class ParallelEvaluator:
         worker_seed: int,  # noqa: ARG004 - reserved for future per-worker seeding
     ) -> list[Any]:
         """Plain function suitable for ``ray.remote`` dispatch."""
+        np_seed = worker_seed & ((1 << 32) - 1)
+        random.seed(worker_seed)
+        import numpy as np
+
+        np.random.seed(np_seed)
         return eval_fn(programs, context)
 
     @staticmethod
@@ -234,11 +287,20 @@ class ParallelEvaluator:
 
     def _make_eval_fn(self, evaluator: Evaluator) -> Callable[..., list[Any]]:
         """Extract a plain callable from the evaluator for remote dispatch."""
-        if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):  # type: ignore[union-attr]
-            return evaluator.evaluate  # type: ignore[union-attr]
+        if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):
+            return cast(Callable[[list[Any], Any], list[Any]], evaluator.evaluate)
+        if hasattr(evaluator, "evaluate_fitness") and callable(
+            evaluator.evaluate_fitness,
+        ):
+            return cast(
+                Callable[[list[Any], Any], list[Any]],
+                evaluator.evaluate_fitness,
+            )
         if callable(evaluator):
-            return evaluator  # type: ignore[return-value]
-        raise AdapterError("Evaluator must implement evaluate() or be callable")
+            return cast(Callable[[list[Any], Any], list[Any]], evaluator)
+        raise AdapterError(
+            "Evaluator must implement evaluate(), evaluate_fitness(), or be callable"
+        )
 
     @staticmethod
     def _call_evaluator(
@@ -246,9 +308,27 @@ class ParallelEvaluator:
         programs: list[Any],
         context: Any,
     ) -> list[Any]:
-        if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):  # type: ignore[union-attr]
-            return evaluator.evaluate(programs, context)  # type: ignore[misc]
+        if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):
+            return cast(Callable[[list[Any], Any], list[Any]], evaluator.evaluate)(
+                programs,
+                context,
+            )
+        if hasattr(evaluator, "evaluate_fitness") and callable(
+            evaluator.evaluate_fitness
+        ):
+            return cast(
+                Callable[[list[Any], Any], list[Any]],
+                evaluator.evaluate_fitness,
+            )(
+                programs,
+                context,
+            )
         if callable(evaluator):
-            return evaluator(programs, context)  # type: ignore[misc]
+            return cast(Callable[[list[Any], Any], list[Any]], evaluator)(
+                programs,
+                context,
+            )
 
-        raise AdapterError("Evaluator must implement evaluate() or be callable")
+        raise AdapterError(
+            "Evaluator must implement evaluate(), evaluate_fitness(), or be callable"
+        )

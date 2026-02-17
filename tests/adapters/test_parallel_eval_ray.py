@@ -26,6 +26,13 @@ class _DummyEvaluator:
         return [p * 2 for p in programs]
 
 
+class _FitnessEvaluatorCompat:
+    """Evaluator with evaluate_fitness only."""
+
+    def evaluate_fitness(self, programs: list[Any], context: Any) -> list[Any]:
+        return [p + 1 for p in programs]
+
+
 def _callable_evaluator(programs: list[Any], context: Any) -> list[Any]:
     return [p + 1 for p in programs]
 
@@ -199,6 +206,11 @@ class TestMakeEvalFn:
         with pytest.raises(AdapterError, match="Evaluator must implement"):
             pe._make_eval_fn("not_an_evaluator")
 
+    def test_uses_evaluate_fitness_fallback(self) -> None:
+        pe = ParallelEvaluator()
+        fn = pe._make_eval_fn(_FitnessEvaluatorCompat())
+        assert fn([3], None) == [4]
+
 
 # ---------------------------------------------------------------------------
 # Ray backend integration (mocked ray)
@@ -259,6 +271,39 @@ class TestEvaluateWithRay:
             result = pe._evaluate_with_ray([1, 2, 3, 4], {}, _DummyEvaluator())
 
         assert result == [2, 4, 6, 8]
+
+    def test_remote_definition_has_max_calls(self) -> None:
+        """max_calls should be wired from max_tasks_per_worker."""
+        mock_ray = _make_mock_ray()
+        max_calls = 17
+        pe = ParallelEvaluator(
+            backend="ray",
+            evaluator=_DummyEvaluator(),
+            max_workers=2,
+            max_tasks_per_worker=max_calls,
+        )
+
+        with patch.dict(sys.modules, {"ray": mock_ray}):
+            pe._evaluate_with_ray([1, 2, 3, 4], {}, _DummyEvaluator())
+
+        mock_ray.remote.assert_called_once_with(
+            ParallelEvaluator._remote_eval_fn, max_calls=max_calls
+        )
+
+    def test_chunking_limits_chunk_count_to_worker_count(self) -> None:
+        """ceil-based chunking should avoid creating excessive chunks."""
+        mock_ray = _make_mock_ray()
+        pe = ParallelEvaluator(
+            backend="ray",
+            evaluator=_DummyEvaluator(),
+            max_workers=2,
+        )
+
+        with patch.dict(sys.modules, {"ray": mock_ray}):
+            pe._evaluate_with_ray(list(range(7)), {}, _DummyEvaluator())
+
+        # len=7 with max_workers=2 should produce 2 chunks via ceil division.
+        assert len(mock_ray._submitted_chunks) == 2
 
     def test_ray_init_called_when_not_initialized(self) -> None:
         """ray.init is called if ray is not initialized."""

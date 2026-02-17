@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
-
-import numpy as np
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from liq.evolution.config import PrimitiveConfig
@@ -89,7 +88,9 @@ class TestBuildTradingRegistryLiqTA:
             self.wrapped = wrapped
             self.calls = 0
 
-        def compute(self, name: str, params: dict[str, Any], data: dict[str, Any], **kwargs: Any) -> np.ndarray:  # type: ignore[override]
+        def compute(
+            self, name: str, params: dict[str, Any], data: dict[str, Any], **kwargs: Any
+        ) -> np.ndarray:
             self.calls += 1
             return self.wrapped.compute(name, params, data, **kwargs)
 
@@ -100,13 +101,13 @@ class TestBuildTradingRegistryLiqTA:
             return self.wrapped.list_indicators(category)
 
     @pytest.fixture
-    def liq_ta_backend(self):  # type: ignore[no-untyped-def]
+    def liq_ta_backend(self):
         liq_ta = pytest.importorskip("liq_ta")  # noqa: F841
         from liq.evolution.primitives.indicators_liq_ta import LiqTAIndicatorBackend
 
         return LiqTAIndicatorBackend()
 
-    def test_enable_liq_ta_registers_indicators(self, liq_ta_backend) -> None:  # type: ignore[no-untyped-def]
+    def test_enable_liq_ta_registers_indicators(self, liq_ta_backend) -> None:
         cfg = PrimitiveConfig(enable_liq_ta=True)
         reg = build_trading_registry(cfg, backend=liq_ta_backend)
         indicators = reg.list_primitives(category="indicator")
@@ -118,14 +119,14 @@ class TestBuildTradingRegistryLiqTA:
         indicators = reg.list_primitives(category="indicator")
         assert len(indicators) == 0
 
-    def test_enable_liq_ta_preserves_other_categories(self, liq_ta_backend) -> None:  # type: ignore[no-untyped-def]
+    def test_enable_liq_ta_preserves_other_categories(self, liq_ta_backend) -> None:
         cfg = PrimitiveConfig(enable_liq_ta=True)
         reg = build_trading_registry(cfg, backend=liq_ta_backend)
         # Standard categories still present
         assert len(reg.list_primitives(category="numeric")) == 12
         assert len(reg.list_primitives(category="temporal")) == 10
 
-    def test_enable_liq_ta_uses_feature_context_caching(self, liq_ta_backend) -> None:  # type: ignore[no-untyped-def]
+    def test_enable_liq_ta_uses_feature_context_caching(self, liq_ta_backend) -> None:
         cfg = PrimitiveConfig(enable_liq_ta=True)
         counting = self._CountingBackend(liq_ta_backend)
 
@@ -139,7 +140,7 @@ class TestBuildTradingRegistryLiqTA:
         assert r1 is r2
         assert counting.calls == 1
 
-    def test_enable_liq_ta_cache_varies_by_params(self, liq_ta_backend) -> None:  # type: ignore[no-untyped-def]
+    def test_enable_liq_ta_cache_varies_by_params(self, liq_ta_backend) -> None:
         cfg = PrimitiveConfig(enable_liq_ta=True)
         counting = self._CountingBackend(liq_ta_backend)
 

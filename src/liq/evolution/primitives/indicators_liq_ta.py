@@ -6,9 +6,9 @@ from typing import Any
 
 import numpy as np
 
+from liq.evolution.protocols import IndicatorBackend
 from liq.gp.primitives.registry import PrimitiveRegistry
 from liq.gp.types import BoolSeries, ParamSpec, Series
-from liq.evolution.protocols import IndicatorBackend
 
 # Default parameter ranges for GP evolution
 _PARAM_RANGES: dict[str, tuple[type, Any, Any, Any]] = {
@@ -372,13 +372,14 @@ def register_liq_ta_indicators(
         inputs = meta["inputs"]
         outputs = meta["outputs"]
         param_names = meta["params"]
-        n_inputs = len(inputs)
         input_types = tuple(Series for _ in inputs)
         param_specs = _make_param_specs(param_names)
 
         if len(outputs) == 1:
             # Single-output indicator
-            wrapper = _make_cached_indicator_callable(backend, name, inputs, output_index=0)
+            wrapper = _make_cached_indicator_callable(
+                backend, name, inputs, output_index=0
+            )
             registry.register(
                 f"ta_{name}",
                 wrapper,

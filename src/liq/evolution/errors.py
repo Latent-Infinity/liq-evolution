@@ -28,15 +28,37 @@ class PrimitiveError(EvolutionError):
 
 
 class EvaluationError(EvolutionError):
-    """Raised when evaluating programs or fitness pipelines fails."""
+    """Raised when GP program evaluation or fitness pipeline execution fails.
+
+    Trigger conditions:
+
+    - A GP program produces invalid array shapes during evaluation.
+    - Runtime errors in evolved expressions (e.g. division by zero propagation).
+    - NaN propagation renders the evaluation context unusable.
+    """
 
 
 class SerializationError(EvolutionError):
-    """Raised when strategy/program serialization fails."""
+    """Raised when program or genome serialization/deserialization fails.
+
+    Trigger conditions:
+
+    - Unknown node types encountered during deserialization.
+    - Genome schema version mismatch or unsupported version.
+    - Corrupt payload data (missing required fields, invalid structure).
+    - Missing registry primitives needed to reconstruct a program.
+    """
 
 
 class FitnessError(EvolutionError):
-    """Raised when fitness metric computation is invalid."""
+    """Raised when fitness metric computation produces invalid results.
+
+    Trigger conditions:
+
+    - All-NaN fitness values from an objective function.
+    - Label and prediction array shape mismatch.
+    - Objective function domain errors (e.g. log of non-positive values).
+    """
 
 
 class PrimitiveSetupError(PrimitiveError):

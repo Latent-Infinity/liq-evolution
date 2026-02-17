@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
 
+from liq.evolution.adapters.parallel_eval import ParallelEvaluator
 from liq.evolution.adapters.signal_output import GPSignalOutput
+from liq.evolution.config import ParallelConfig
 from liq.evolution.errors import AdapterError, SerializationError
 from liq.gp.config import GPConfig as LiqGPConfig
 from liq.gp.evolution.engine import evolve
@@ -46,14 +49,16 @@ class GPStrategyAdapter:
         gp_config: GPConfig,
         evaluator: object | None = None,
         *,
-        seed_programs: list[Program] | None = None,
+        seed_programs: Sequence[Program] | None = None,
         warm_start: bool = False,
+        parallel_config: ParallelConfig | None = None,
     ) -> None:
         self._registry = registry
         self._gp_config = gp_config
         self._evaluator = evaluator
         self._seed_programs = seed_programs
         self._warm_start = warm_start
+        self._parallel_config = parallel_config
         self._program: Program | None = None
         self._evolution_result: EvolutionResult | None = None
 
@@ -90,10 +95,23 @@ class GPStrategyAdapter:
         if labels is not None:
             context["labels"] = labels.to_numpy()
 
+        evaluator = self._evaluator
+        if self._parallel_config is not None:
+            evaluator = ParallelEvaluator(
+                evaluator=evaluator,
+                backend=self._parallel_config.backend,
+                max_workers=self._parallel_config.max_workers,
+                max_in_flight=self._parallel_config.max_in_flight,
+                max_tasks_per_worker=self._parallel_config.max_tasks_per_worker,
+                memory_limit_mb=self._parallel_config.memory_limit_mb,
+                memory_warn_threshold_mb=self._parallel_config.memory_warn_threshold_mb,
+                auto_fallback=self._parallel_config.auto_fallback,
+            )
+
         result = evolve(
             self._registry,
             self._gp_config,
-            self._evaluator,
+            evaluator,
             context,
             seed_programs=self._seed_programs,
         )

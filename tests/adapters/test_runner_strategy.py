@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 from liq.evolution.adapters.signal_output import GPSignalOutput
+from liq.evolution.config import ParallelConfig
 from liq.evolution.errors import AdapterError
 from liq.evolution.protocols import GPStrategy
 from liq.gp.program.ast import TerminalNode
@@ -234,6 +235,27 @@ class TestGPStrategyAdapterFit:
         )
         adapter.fit(_make_dataframe())
         assert adapter.program is program
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_fit_with_parallel_config_wraps_evaluator(self, mock_evolve) -> None:
+        from liq.evolution.adapters.parallel_eval import ParallelEvaluator
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        mock_evolve.return_value = _make_evolution_result()
+
+        adapter = GPStrategyAdapter(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            MagicMock(),
+            parallel_config=ParallelConfig(backend="ray", max_workers=4),
+        )
+        adapter.fit(_make_dataframe())
+
+        evaluator = mock_evolve.call_args[0][2]
+        assert isinstance(evaluator, ParallelEvaluator)
+        assert evaluator.backend == "ray"
 
     @patch("liq.evolution.adapters.runner_strategy.evolve")
     def test_fit_stores_evolution_result(self, mock_evolve) -> None:
