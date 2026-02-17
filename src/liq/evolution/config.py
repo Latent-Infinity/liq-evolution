@@ -10,9 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from liq.evolution.errors import ConfigurationError
+from liq.gp.config import FitnessConfig as LiqGPFitnessConfig
+from liq.gp.config import GPConfig as LiqGPConfig
 
 
 class PrimitiveConfig(BaseModel, frozen=True):
@@ -72,19 +74,37 @@ class ParallelConfig(BaseModel, frozen=True):
     Attributes:
         backend: Parallelisation backend to use.
         max_workers: Maximum number of parallel workers.
+        max_in_flight: Maximum concurrent tasks submitted to ray.
+        max_tasks_per_worker: Worker lifecycle recycling threshold.
         memory_limit_mb: Memory limit per worker in megabytes.
+        memory_warn_threshold_mb: RSS threshold for warning log.
+        auto_fallback: Fallback to sequential on memory pressure.
     """
 
     backend: Literal["sequential", "ray"] = "sequential"
     max_workers: int = 1
+    max_in_flight: int = 4
+    max_tasks_per_worker: int = 100
     memory_limit_mb: int = 2048
+    memory_warn_threshold_mb: int = 1536
+    auto_fallback: bool = True
 
     @model_validator(mode="after")
     def _validate_parallel(self) -> Self:
         if self.max_workers < 1:
             raise ConfigurationError("max_workers must be >= 1")
+        if self.max_in_flight < 1:
+            raise ConfigurationError("max_in_flight must be >= 1")
+        if self.max_tasks_per_worker < 1:
+            raise ConfigurationError("max_tasks_per_worker must be >= 1")
         if self.memory_limit_mb < 128:
             raise ConfigurationError("memory_limit_mb must be >= 128")
+        if self.memory_warn_threshold_mb < 0:
+            raise ConfigurationError("memory_warn_threshold_mb must be >= 0")
+        if self.memory_warn_threshold_mb >= self.memory_limit_mb:
+            raise ConfigurationError(
+                "memory_warn_threshold_mb must be < memory_limit_mb"
+            )
         return self
 
 
@@ -128,6 +148,10 @@ class GPConfig(BaseModel, frozen=True):
             raise ConfigurationError("tournament_size must be >= 1")
         if self.elitism_count < 0:
             raise ConfigurationError("elitism_count must be >= 0")
+
+        total_rate = self.crossover_rate + self.mutation_rate
+        if total_rate > 1.0:
+            raise ConfigurationError("crossover_rate + mutation_rate must be <= 1.0")
         return self
 
 
@@ -150,6 +174,7 @@ class SerializationConfig(BaseModel, frozen=True):
     """Configuration for serialized strategy/program payloads."""
 
     schema_version: str = "1.0"
+    enable_persistent_cache: bool = False
 
 
 class EvolutionConfig(BaseModel, frozen=True):
@@ -173,9 +198,12 @@ class EvolutionConfig(BaseModel, frozen=True):
     max_depth: int = 8
     generations: int = 50
     seed: int = 42
+    batch_size: int | None = None
+    full_eval_interval: int = 10
     primitives: PrimitiveConfig = PrimitiveConfig()
     fitness_stages: FitnessStageConfig = FitnessStageConfig()
     parallel: ParallelConfig = ParallelConfig()
+    gp: GPConfig = Field(default_factory=GPConfig)
     warm_start: WarmStartConfig = WarmStartConfig()
 
     @model_validator(mode="after")
@@ -186,4 +214,50 @@ class EvolutionConfig(BaseModel, frozen=True):
             raise ConfigurationError("max_depth must be >= 2")
         if self.generations < 1:
             raise ConfigurationError("generations must be >= 1")
+        if self.batch_size is not None and self.batch_size < 1:
+            raise ConfigurationError("batch_size must be >= 1 when set")
+        if self.full_eval_interval < 1:
+            raise ConfigurationError("full_eval_interval must be >= 1")
         return self
+
+
+def build_gp_config(evo: EvolutionConfig) -> LiqGPConfig:
+    """Convert an :class:`EvolutionConfig` to a :class:`liq.gp.config.GPConfig`.
+
+    Direct fields (``population_size``, ``max_depth``, ``generations``,
+    ``seed``) are mapped 1-to-1.  The embedded :class:`GPConfig` provides
+    ``crossover_rate`` and ``mutation_rate`` and is used to derive the five
+    operator rates required by :pyclass:`liq.gp.config.GPConfig`:
+
+    * ``crossover_rate``              = *crossover_rate*
+    * ``subtree_mutation_rate``       = 0.4 * *mutation_rate*
+    * ``point_mutation_rate``         = 0.3 * *mutation_rate*
+    * ``parameter_mutation_rate``     = 0.2 * *mutation_rate*
+    * ``hoist_mutation_rate``         = 0.1 * *mutation_rate*
+
+    ``tournament_size`` is taken from the embedded :class:`GPConfig`, clamped to
+    a minimum of 2 (liq-gp requirement).
+    ``elitism_count`` is taken from the embedded :class:`GPConfig`.
+    """
+    local = evo.gp
+
+    cr = local.crossover_rate
+    mr = local.mutation_rate
+
+    return LiqGPConfig(
+        population_size=evo.population_size,
+        max_depth=evo.max_depth,
+        generations=evo.generations,
+        seed=evo.seed,
+        crossover_rate=cr,
+        subtree_mutation_rate=0.4 * mr,
+        point_mutation_rate=0.3 * mr,
+        parameter_mutation_rate=0.2 * mr,
+        hoist_mutation_rate=0.1 * mr,
+        tournament_size=max(local.tournament_size, 2),
+        elitism_count=local.elitism_count,
+        fitness=LiqGPFitnessConfig(
+            batch_size=evo.batch_size,
+            full_eval_interval=evo.full_eval_interval,
+        ),
+    )

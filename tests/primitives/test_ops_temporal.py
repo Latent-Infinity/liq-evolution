@@ -242,3 +242,57 @@ class TestOutputLength:
         a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         b = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
         assert len(op(a, b, **kwargs)) == 5
+
+
+class TestSafeChangeEdgeCases:
+    """Edge cases for safe_change: period >= len(a)."""
+
+    def test_period_equals_length_all_nan(self) -> None:
+        a = np.array([10.0, 20.0, 30.0])
+        result = safe_change(a, period=3)
+        assert len(result) == 3
+        assert np.all(np.isnan(result))
+
+    def test_period_exceeds_length_all_nan(self) -> None:
+        a = np.array([10.0, 20.0])
+        result = safe_change(a, period=5)
+        assert len(result) == 2
+        assert np.all(np.isnan(result))
+
+    def test_single_element_period_1(self) -> None:
+        a = np.array([42.0])
+        result = safe_change(a, period=1)
+        assert len(result) == 1
+        assert np.isnan(result[0])
+
+
+class TestSafePctChangeEdgeCases:
+    """Edge cases for safe_pct_change: period >= len(a)."""
+
+    def test_period_equals_length_all_nan(self) -> None:
+        a = np.array([10.0, 20.0, 30.0])
+        result = safe_pct_change(a, period=3)
+        assert len(result) == 3
+        assert np.all(np.isnan(result))
+
+    def test_period_exceeds_length_all_nan(self) -> None:
+        a = np.array([10.0])
+        result = safe_pct_change(a, period=5)
+        assert len(result) == 1
+        assert np.isnan(result[0])
+
+
+class TestSafeNBarsAgoEdgeCases:
+    """Edge cases for safe_n_bars_ago: shift >= len(a)."""
+
+    def test_shift_equals_length_all_nan(self) -> None:
+        a = np.array([1.0, 2.0, 3.0])
+        result = safe_n_bars_ago(a, shift=3)
+        assert len(result) == 3
+        assert np.all(np.isnan(result))
+
+    def test_shift_exceeds_length_all_nan(self) -> None:
+        a = np.array([1.0, 2.0])
+        result = safe_n_bars_ago(a, shift=10)
+        assert len(result) == 2
+        assert np.all(np.isnan(result))

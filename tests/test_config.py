@@ -104,7 +104,7 @@ class TestParallelConfigDefaults:
             ParallelConfig(memory_limit_mb=64)
 
     def test_memory_limit_boundary_accepted(self) -> None:
-        cfg = ParallelConfig(memory_limit_mb=128)
+        cfg = ParallelConfig(memory_limit_mb=128, memory_warn_threshold_mb=64)
         assert cfg.memory_limit_mb == 128
 
 
@@ -169,9 +169,12 @@ class TestEvolutionConfigDefaults:
         cfg = EvolutionConfig(
             primitives=PrimitiveConfig(enable_liq_ta=True),
             parallel=ParallelConfig(max_workers=4),
+            gp=GPConfig(mutation_rate=0.4, crossover_rate=0.5),
         )
         assert cfg.primitives.enable_liq_ta is True
         assert cfg.parallel.max_workers == 4
+        assert cfg.gp.mutation_rate == 0.4
+        assert cfg.gp.crossover_rate == 0.5
 
 
 class TestGPConfig:
@@ -224,6 +227,13 @@ class TestGPConfig:
     def test_elitism_count_negative_rejected(self) -> None:
         with pytest.raises(ConfigurationError, match="elitism_count"):
             GPConfig(elitism_count=-1)
+
+    def test_mutation_and_crossover_total_greater_than_one_rejected(self) -> None:
+        with pytest.raises(
+            ConfigurationError,
+            match=r"crossover_rate \+ mutation_rate must be <= 1.0",
+        ):
+            GPConfig(crossover_rate=0.8, mutation_rate=0.3)
 
 
 class TestFitnessConfig:

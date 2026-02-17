@@ -9,6 +9,9 @@ liq_ta = pytest.importorskip("liq_ta")
 
 from liq.evolution.primitives.indicators_liq_ta import (  # noqa: E402
     LiqTAIndicatorBackend,
+    _coerce_output,
+    _make_multi_output_callable,
+    _make_single_output_callable,
     register_liq_ta_indicators,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry  # noqa: E402
@@ -190,3 +193,306 @@ class TestRegistration:
         low = close - rng.uniform(0, 2, n)
         result = doji.callable(open_, high, low, close)
         assert result.dtype == np.float64
+
+
+class TestCoerceOutput:
+    """Direct tests for _coerce_output helper."""
+
+    def test_none_result_no_buffer_raises(self) -> None:
+        with pytest.raises(TypeError, match="returned None"):
+            _coerce_output(None, out=None)
+
+    def test_none_result_with_buffer_returns_buffer(self) -> None:
+        buf = np.zeros(5, dtype=np.float64)
+        result = _coerce_output(None, out=buf)
+        assert result is buf
+
+    def test_with_out_buffer_populates(self) -> None:
+        buf = np.zeros(3, dtype=np.float64)
+        data = np.array([1.0, 2.0, 3.0])
+        result = _coerce_output(data, out=buf)
+        assert result is buf
+        np.testing.assert_array_equal(buf, [1.0, 2.0, 3.0])
+
+    def test_no_buffer_returns_array(self) -> None:
+        data = [1, 2, 3]
+        result = _coerce_output(data, out=None)
+        assert result.dtype == np.float64
+        np.testing.assert_array_equal(result, [1.0, 2.0, 3.0])
+
+
+class TestMakeSingleOutputCallableArity0:
+    """Test _make_single_output_callable with n_inputs=0."""
+
+    def test_no_out(self) -> None:
+        def fake(**kwargs: object) -> np.ndarray:
+            return np.array([1.0, 2.0])
+
+        wrapper = _make_single_output_callable(fake, n_inputs=0, supports_out=False)
+        result = wrapper()
+        np.testing.assert_array_equal(result, [1.0, 2.0])
+
+    def test_supports_out_with_out(self) -> None:
+        buf = np.zeros(3, dtype=np.float64)
+
+        def fake(out: np.ndarray | None = None, **kwargs: object) -> None:
+            out[:] = [7.0, 8.0, 9.0]  # type: ignore[index]
+
+        wrapper = _make_single_output_callable(fake, n_inputs=0, supports_out=True)
+        result = wrapper(out=buf)
+        assert result is buf
+        np.testing.assert_array_equal(buf, [7.0, 8.0, 9.0])
+
+    def test_supports_out_without_out_falls_through(self) -> None:
+        def fake(**kwargs: object) -> np.ndarray:
+            return np.array([4.0, 5.0])
+
+        wrapper = _make_single_output_callable(fake, n_inputs=0, supports_out=True)
+        result = wrapper()
+        np.testing.assert_array_equal(result, [4.0, 5.0])
+
+
+class TestMakeSingleOutputCallableArity1:
+    """Test _make_single_output_callable with n_inputs=1, supports_out path."""
+
+    def test_supports_out_with_out(self) -> None:
+        buf = np.zeros(3, dtype=np.float64)
+
+        def fake(
+            a: np.ndarray, out: np.ndarray | None = None, **kwargs: object
+        ) -> None:
+            out[:] = a * 2  # type: ignore[index]
+
+        wrapper = _make_single_output_callable(fake, n_inputs=1, supports_out=True)
+        result = wrapper(np.array([1.0, 2.0, 3.0]), out=buf)
+        assert result is buf
+        np.testing.assert_array_equal(buf, [2.0, 4.0, 6.0])
+
+
+class TestMakeSingleOutputCallableArity2:
+    """Test _make_single_output_callable with n_inputs=2."""
+
+    def test_no_out(self) -> None:
+        def fake(a: np.ndarray, b: np.ndarray, **kwargs: object) -> np.ndarray:
+            return a + b
+
+        wrapper = _make_single_output_callable(fake, n_inputs=2, supports_out=False)
+        result = wrapper(np.array([1.0, 2.0]), np.array([3.0, 4.0]))
+        np.testing.assert_array_equal(result, [4.0, 6.0])
+
+    def test_supports_out_with_out(self) -> None:
+        buf = np.zeros(2, dtype=np.float64)
+
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            out: np.ndarray | None = None,
+            **kwargs: object,
+        ) -> None:
+            out[:] = a - b  # type: ignore[index]
+
+        wrapper = _make_single_output_callable(fake, n_inputs=2, supports_out=True)
+        result = wrapper(np.array([5.0, 6.0]), np.array([1.0, 2.0]), out=buf)
+        assert result is buf
+        np.testing.assert_array_equal(buf, [4.0, 4.0])
+
+
+class TestMakeSingleOutputCallableArity3:
+    """Test _make_single_output_callable with n_inputs=3."""
+
+    def test_no_out(self) -> None:
+        def fake(
+            a: np.ndarray, b: np.ndarray, c: np.ndarray, **kwargs: object
+        ) -> np.ndarray:
+            return a + b + c
+
+        wrapper = _make_single_output_callable(fake, n_inputs=3, supports_out=False)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+        )
+        np.testing.assert_array_equal(result, [6.0])
+
+    def test_supports_out_with_out(self) -> None:
+        buf = np.zeros(1, dtype=np.float64)
+
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            out: np.ndarray | None = None,
+            **kwargs: object,
+        ) -> None:
+            out[:] = a + b + c  # type: ignore[index]
+
+        wrapper = _make_single_output_callable(fake, n_inputs=3, supports_out=True)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+            out=buf,
+        )
+        assert result is buf
+        np.testing.assert_array_equal(buf, [6.0])
+
+
+class TestMakeSingleOutputCallableArity4:
+    """Test _make_single_output_callable with n_inputs=4."""
+
+    def test_no_out(self) -> None:
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            d: np.ndarray,
+            **kwargs: object,
+        ) -> np.ndarray:
+            return a + b + c + d
+
+        wrapper = _make_single_output_callable(fake, n_inputs=4, supports_out=False)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+            np.array([4.0]),
+        )
+        np.testing.assert_array_equal(result, [10.0])
+
+    def test_supports_out_with_out(self) -> None:
+        buf = np.zeros(1, dtype=np.float64)
+
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            d: np.ndarray,
+            out: np.ndarray | None = None,
+            **kwargs: object,
+        ) -> None:
+            out[:] = a + b + c + d  # type: ignore[index]
+
+        wrapper = _make_single_output_callable(fake, n_inputs=4, supports_out=True)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+            np.array([4.0]),
+            out=buf,
+        )
+        assert result is buf
+        np.testing.assert_array_equal(buf, [10.0])
+
+
+class TestMakeMultiOutputCallable:
+    """Test _make_multi_output_callable for various arities."""
+
+    def test_arity1(self) -> None:
+        def fake(a: np.ndarray, **kwargs: object) -> tuple[np.ndarray, np.ndarray]:
+            return (a * 2, a * 3)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=1, output_index=1)
+        result = wrapper(np.array([1.0, 2.0]))
+        np.testing.assert_array_equal(result, [3.0, 6.0])
+
+    def test_arity1_with_out(self) -> None:
+        buf = np.zeros(2, dtype=np.float64)
+
+        def fake(a: np.ndarray, **kwargs: object) -> tuple[np.ndarray, np.ndarray]:
+            return (a * 2, a * 3)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=1, output_index=0)
+        result = wrapper(np.array([1.0, 2.0]), out=buf)
+        assert result is buf
+        np.testing.assert_array_equal(buf, [2.0, 4.0])
+
+    def test_arity2(self) -> None:
+        def fake(
+            a: np.ndarray, b: np.ndarray, **kwargs: object
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (a + b, a - b)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=2, output_index=0)
+        result = wrapper(np.array([5.0]), np.array([3.0]))
+        np.testing.assert_array_equal(result, [8.0])
+
+    def test_arity2_index1(self) -> None:
+        def fake(
+            a: np.ndarray, b: np.ndarray, **kwargs: object
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (a + b, a - b)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=2, output_index=1)
+        result = wrapper(np.array([5.0]), np.array([3.0]))
+        np.testing.assert_array_equal(result, [2.0])
+
+    def test_arity3(self) -> None:
+        def fake(
+            a: np.ndarray, b: np.ndarray, c: np.ndarray, **kwargs: object
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (a + b + c, a * b * c)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=3, output_index=1)
+        result = wrapper(np.array([2.0]), np.array([3.0]), np.array([4.0]))
+        np.testing.assert_array_equal(result, [24.0])
+
+    def test_arity4(self) -> None:
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            d: np.ndarray,
+            **kwargs: object,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (a + b + c + d, a * b * c * d)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=4, output_index=0)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+            np.array([4.0]),
+        )
+        np.testing.assert_array_equal(result, [10.0])
+
+    def test_arity4_index1(self) -> None:
+        def fake(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            d: np.ndarray,
+            **kwargs: object,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (a + b + c + d, a * b * c * d)
+
+        wrapper = _make_multi_output_callable(fake, n_inputs=4, output_index=1)
+        result = wrapper(
+            np.array([1.0]),
+            np.array([2.0]),
+            np.array([3.0]),
+            np.array([4.0]),
+        )
+        np.testing.assert_array_equal(result, [24.0])
+
+
+class TestComputeEdgeCases:
+    """Test compute() edge cases in LiqTAIndicatorBackend."""
+
+    def test_unknown_indicator_raises(self, backend: LiqTAIndicatorBackend) -> None:
+        # Use a name that exists as a liq_ta attribute but is not
+        # a registered indicator nor a candlestick pattern.
+        with pytest.raises(ValueError, match="Unknown indicator"):
+            backend.compute("get_indicator_info", {}, {})
+
+    def test_compute_with_supports_out(
+        self,
+        backend: LiqTAIndicatorBackend,
+        sample_data: dict,
+    ) -> None:
+        """SMA supports_out -- call compute with out buffer."""
+        buf = np.zeros(100, dtype=np.float64)
+        result = backend.compute("sma", {"period": 14}, sample_data, out=buf)
+        # The buffer should be returned and populated
+        assert result is buf
+        # At least some values should be non-zero
+        assert not np.all(buf == 0.0)

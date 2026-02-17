@@ -8,6 +8,7 @@ import numpy as np
 
 from liq.gp.primitives.registry import PrimitiveRegistry
 from liq.gp.types import BoolSeries, ParamSpec, Series
+from liq.evolution.protocols import IndicatorBackend
 
 # Default parameter ranges for GP evolution
 _PARAM_RANGES: dict[str, tuple[type, Any, Any, Any]] = {
@@ -61,7 +62,9 @@ def _coerce_output(result: Any, out: np.ndarray | None = None) -> np.ndarray:
     """Coerce indicator outputs to float64 and optionally reuse an output buffer."""
     if result is None:
         if out is None:
-            msg = "Indicator computation returned None and no output buffer was provided."
+            msg = (
+                "Indicator computation returned None and no output buffer was provided."
+            )
             raise TypeError(msg)
         return out
     arr = np.asarray(result, dtype=np.float64)
@@ -78,7 +81,9 @@ def _make_single_output_callable(
 ) -> Any:
     """Create a callable for single-output indicators."""
 
-    def _split_kwargs(kwargs: dict[str, Any]) -> tuple[dict[str, Any], np.ndarray | None]:
+    def _split_kwargs(
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], np.ndarray | None]:
         out = kwargs.pop("out", None)
         return kwargs, out
 
@@ -147,7 +152,9 @@ def _make_multi_output_callable(
     """Create a callable that selects one output from a multi-output indicator."""
     _ = supports_out
 
-    def _split_kwargs(kwargs: dict[str, Any]) -> tuple[dict[str, Any], np.ndarray | None]:
+    def _split_kwargs(
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], np.ndarray | None]:
         out = kwargs.pop("out", None)
         return kwargs, out
 
@@ -203,6 +210,76 @@ def _make_candlestick_callable(func: Any) -> Any:
         return np.asarray(result, dtype=np.float64)
 
     return wrapper
+
+
+def _make_cached_indicator_callable(
+    backend: IndicatorBackend,
+    name: str,
+    input_names: list[str],
+    output_index: int,
+) -> Any:
+    """Create a callable that evaluates through an IndicatorBackend.
+
+    This avoids direct ``liq-ta`` function usage and allows caching wrappers
+    (e.g. :class:`FeatureContext`) to be used safely.
+    """
+
+    def _split_kwargs(
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], np.ndarray | None]:
+        out = kwargs.pop("out", None)
+        return kwargs, out
+
+    def wrapper(*args: np.ndarray, **kwargs: Any) -> np.ndarray:
+        if len(args) != len(input_names):
+            msg = f"{name} expects {len(input_names)} inputs, got {len(args)}"
+            raise TypeError(msg)
+
+        kwargs, out = _split_kwargs(kwargs)
+        data = dict(zip(input_names, args, strict=False))
+        return backend.compute(name, kwargs, data, output_index=output_index, out=out)
+
+    return wrapper
+
+
+def _backend_indicators(backend: IndicatorBackend) -> dict[str, dict[str, Any]]:
+    """Resolve indicator metadata source from a backend wrapper."""
+
+    metadata_source = getattr(backend, "_indicators", None)
+    if metadata_source is not None:
+        return metadata_source
+
+    nested_backend = getattr(backend, "_backend", None)
+    if nested_backend is not None:
+        metadata_source = getattr(nested_backend, "_indicators", None)
+        if metadata_source is not None:
+            return metadata_source
+
+    import liq_ta
+
+    return dict(liq_ta.INDICATORS)
+
+
+def _backend_candlestick_patterns(backend: IndicatorBackend) -> list[str]:
+    """Resolve candlestick discovery source from a backend wrapper."""
+
+    patterns = getattr(backend, "_candlestick_patterns", None)
+    if patterns is not None:
+        return patterns
+
+    nested_backend = getattr(backend, "_backend", None)
+    if nested_backend is not None:
+        patterns = getattr(nested_backend, "_candlestick_patterns", None)
+        if patterns is not None:
+            return patterns
+
+    import liq_ta
+
+    return [
+        name
+        for name in sorted(dir(liq_ta))
+        if name.startswith(_CDL_PREFIX) and callable(getattr(liq_ta, name))
+    ]
 
 
 class LiqTAIndicatorBackend:
@@ -279,7 +356,7 @@ class LiqTAIndicatorBackend:
 
 def register_liq_ta_indicators(
     registry: PrimitiveRegistry,
-    backend: LiqTAIndicatorBackend,
+    backend: IndicatorBackend,
 ) -> None:
     """Register liq-ta indicator primitives into the registry.
 
@@ -287,22 +364,21 @@ def register_liq_ta_indicators(
         registry: The GP primitive registry to populate.
         backend: The indicator computation backend.
     """
-    import liq_ta
+    indicators_meta = _backend_indicators(backend)
+    candlestick_patterns = _backend_candlestick_patterns(backend)
 
     # Register standard indicators
-    for name, meta in backend._indicators.items():
-        func = getattr(liq_ta, name)
+    for name, meta in indicators_meta.items():
         inputs = meta["inputs"]
         outputs = meta["outputs"]
         param_names = meta["params"]
         n_inputs = len(inputs)
         input_types = tuple(Series for _ in inputs)
         param_specs = _make_param_specs(param_names)
-        supports_out = bool(meta.get("supports_out", False))
 
         if len(outputs) == 1:
             # Single-output indicator
-            wrapper = _make_single_output_callable(func, n_inputs, supports_out)
+            wrapper = _make_cached_indicator_callable(backend, name, inputs, output_index=0)
             registry.register(
                 f"ta_{name}",
                 wrapper,
@@ -314,11 +390,11 @@ def register_liq_ta_indicators(
         else:
             # Multi-output: register one primitive per output
             for idx, out_name in enumerate(outputs):
-                wrapper = _make_multi_output_callable(
-                    func,
-                    n_inputs,
-                    idx,
-                    supports_out=supports_out,
+                wrapper = _make_cached_indicator_callable(
+                    backend,
+                    name,
+                    inputs,
+                    output_index=idx,
                 )
                 registry.register(
                     f"ta_{name}_{out_name}",
@@ -330,9 +406,13 @@ def register_liq_ta_indicators(
                 )
 
     # Register candlestick patterns
-    for name in backend._candlestick_patterns:
-        func = getattr(liq_ta, name)
-        wrapper = _make_candlestick_callable(func)
+    for name in candlestick_patterns:
+        wrapper = _make_cached_indicator_callable(
+            backend,
+            name,
+            ["open", "high", "low", "close"],
+            output_index=0,
+        )
         registry.register(
             f"ta_{name}",
             wrapper,

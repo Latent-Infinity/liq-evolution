@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from liq.evolution.primitives.series_sources import (
     prepare_evaluation_context,
@@ -138,3 +139,14 @@ class TestPrepareEvaluationContext:
         ctx = prepare_evaluation_context(sample_ohlcv)
         for key in EXPECTED_TERMINALS:
             assert ctx[key].dtype == np.float64, f"{key} has dtype {ctx[key].dtype}"
+
+
+class TestTerminalMissingCallable:
+    """Test that terminal callables raise KeyError when called directly."""
+
+    def test_callable_raises_key_error(self) -> None:
+        from liq.evolution.primitives.series_sources import _terminal_missing
+
+        fn = _terminal_missing("close")
+        with pytest.raises(KeyError, match="close"):
+            fn()

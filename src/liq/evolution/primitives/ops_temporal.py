@@ -30,15 +30,18 @@ def safe_is_falling(a: np.ndarray, *, period: int = 3) -> np.ndarray:
 def safe_n_bars_ago(a: np.ndarray, *, shift: int = 1) -> np.ndarray:
     """Shift series by `shift` bars; leading bars are NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[:shift] = np.nan
-    result[shift:] = a[: len(a) - shift]
+    if shift >= len(a):
+        result[:] = np.nan
+    else:
+        result[:shift] = np.nan
+        result[shift:] = a[: len(a) - shift]
     return result
 
 
 def safe_highest(a: np.ndarray, *, period: int = 20) -> np.ndarray:
     """Rolling maximum over `period` bars; leading bars are NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[: period - 1] = np.nan
+    result[:] = np.nan
     if period <= len(a):
         windows = sliding_window_view(a, period)
         result[period - 1 :] = np.max(windows, axis=1)
@@ -48,7 +51,7 @@ def safe_highest(a: np.ndarray, *, period: int = 20) -> np.ndarray:
 def safe_lowest(a: np.ndarray, *, period: int = 20) -> np.ndarray:
     """Rolling minimum over `period` bars; leading bars are NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[: period - 1] = np.nan
+    result[:] = np.nan
     if period <= len(a):
         windows = sliding_window_view(a, period)
         result[period - 1 :] = np.min(windows, axis=1)
@@ -61,7 +64,7 @@ def safe_percentile_rank(a: np.ndarray, *, period: int = 20) -> np.ndarray:
     Returns 0-100 scale.
     """
     result = np.empty(len(a), dtype=np.float64)
-    result[: period - 1] = np.nan
+    result[:] = np.nan
     if period <= len(a):
         windows = sliding_window_view(a, period)
         # For each window, count values <= current value, normalize to 0-100
@@ -80,7 +83,7 @@ def safe_greater_count(
 ) -> np.ndarray:
     """Count bars where a >= b within rolling window; leading bars NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[: period - 1] = np.nan
+    result[:] = np.nan
     if period <= len(a):
         gt = np.where(a >= b, 1.0, 0.0)
         windows = sliding_window_view(gt, period)
@@ -96,7 +99,7 @@ def safe_lower_count(
 ) -> np.ndarray:
     """Count bars where a <= b within rolling window; leading bars NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[: period - 1] = np.nan
+    result[:] = np.nan
     if period <= len(a):
         lt = np.where(a <= b, 1.0, 0.0)
         windows = sliding_window_view(lt, period)
@@ -107,20 +110,26 @@ def safe_lower_count(
 def safe_change(a: np.ndarray, *, period: int = 1) -> np.ndarray:
     """Absolute change: a[t] - a[t - period]; leading bars NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[:period] = np.nan
-    result[period:] = a[period:] - a[: len(a) - period]
+    if period >= len(a):
+        result[:] = np.nan
+    else:
+        result[:period] = np.nan
+        result[period:] = a[period:] - a[: len(a) - period]
     return result
 
 
 def safe_pct_change(a: np.ndarray, *, period: int = 1) -> np.ndarray:
     """Percent change: (a[t] - a[t-period]) / a[t-period]; leading bars NaN."""
     result = np.empty(len(a), dtype=np.float64)
-    result[:period] = np.nan
-    prev = a[: len(a) - period]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        pct = (a[period:] - prev) / prev
-    pct = np.where(np.isfinite(pct), pct, np.nan)
-    result[period:] = pct
+    if period >= len(a):
+        result[:] = np.nan
+    else:
+        result[:period] = np.nan
+        prev = a[: len(a) - period]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pct = (a[period:] - prev) / prev
+        pct = np.where(np.isfinite(pct), pct, np.nan)
+        result[period:] = pct
     return result
 
 

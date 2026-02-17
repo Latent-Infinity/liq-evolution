@@ -147,3 +147,16 @@ class FitnessStageEvaluator(FitnessEvaluator, Protocol):
         context: Any,
     ) -> list[Any]:
         return self.evaluate_fitness(programs, context)
+
+
+@runtime_checkable
+class StoreBackend(Protocol):
+    """Protocol for pluggable storage backends (e.g. liq-store).
+
+    Consumers implement this to provide key-value persistence without
+    requiring liq-evolution to depend on any specific storage library.
+    """
+
+    def get(self, key: str) -> bytes | None: ...
+
+    def put(self, key: str, data: bytes) -> None: ...

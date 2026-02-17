@@ -117,6 +117,9 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/liq/evolution"]
+omit = [
+    "src/liq/evolution/adapters/signals_provider.py",  # requires liq-core (not yet available)
+]
 branch = true
 
 [tool.coverage.report]

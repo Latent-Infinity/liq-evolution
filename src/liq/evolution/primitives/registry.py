@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from liq.evolution.config import PrimitiveConfig
 from liq.evolution.errors import PrimitiveSetupError
+from liq.evolution.primitives.feature_context import FeatureContext
 from liq.evolution.primitives.ops_comparison import register_comparison_ops
 from liq.evolution.primitives.ops_crossover import register_crossover_ops
 from liq.evolution.primitives.ops_logic import register_logic_ops
@@ -59,7 +60,13 @@ def build_trading_registry(
                 register_liq_ta_indicators,
             )
 
-            register_liq_ta_indicators(registry, backend)
+            # Enable in-memory caching by default for indicator computations.
+            # Avoid double-wrapping when callers already provide a cache wrapper.
+            cached_backend = backend
+            if not isinstance(backend, FeatureContext):
+                cached_backend = FeatureContext(backend)
+
+            register_liq_ta_indicators(registry, cached_backend)
 
         return registry
     except Exception as exc:

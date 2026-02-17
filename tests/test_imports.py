@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 class TestSubpackageImports:
     """Verify all subpackages are importable."""
@@ -104,6 +106,7 @@ class TestSubpackageImports:
         assert ParallelEvaluator is not None
 
     def test_adapters_signals_provider(self) -> None:
+        pytest.importorskip("liq.core", reason="liq-core not installed")
         from liq.evolution.adapters.signals_provider import GPSignalProvider
 
         assert GPSignalProvider is not None
@@ -182,3 +185,24 @@ class TestPublicAPIReexports:
         assert ConfigurationError is not None
         assert ParallelExecutionError is not None
         assert isinstance(__version__, str)
+
+    def test_phase4_genome_exports(self) -> None:
+        from liq.evolution import (
+            Genome,
+            deserialize_genome,
+            serialize_genome,
+        )
+
+        assert Genome is not None
+        assert callable(serialize_genome)
+        assert callable(deserialize_genome)
+
+    def test_phase4_feature_context_export(self) -> None:
+        from liq.evolution import FeatureContext
+
+        assert FeatureContext is not None
+
+    def test_phase4_store_backend_export(self) -> None:
+        from liq.evolution import StoreBackend
+
+        assert StoreBackend is not None
