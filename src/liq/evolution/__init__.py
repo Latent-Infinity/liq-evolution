@@ -60,6 +60,14 @@ from liq.evolution.protocols import (
     PrimitiveRegistry,
     StoreBackend,
 )
+from liq.evolution.seeds import (
+    StrategySeedTemplate,
+    build_strategy_seed,
+    build_strategy_seeds,
+    get_seed_template,
+    list_known_strategy_seeds,
+)
+from liq.gp.config import SeedInjectionConfig
 
 __all__ = [
     # Configuration
@@ -93,6 +101,12 @@ __all__ = [
     "build_trading_registry",
     "prepare_evaluation_context",
     "build_gp_config",
+    "SeedInjectionConfig",
+    "build_strategy_seed",
+    "build_strategy_seeds",
+    "get_seed_template",
+    "list_known_strategy_seeds",
+    "StrategySeedTemplate",
     # Caching
     "FeatureContext",
     # Evolution engine
@@ -119,4 +133,4 @@ __all__ = [
     "FitnessError",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

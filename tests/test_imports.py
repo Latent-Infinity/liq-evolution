@@ -206,3 +206,20 @@ class TestPublicAPIReexports:
         from liq.evolution import StoreBackend
 
         assert StoreBackend is not None
+
+    def test_seed_factory_exports(self) -> None:
+        from liq.evolution import (
+            SeedInjectionConfig,
+            StrategySeedTemplate,
+            build_strategy_seed,
+            build_strategy_seeds,
+            get_seed_template,
+            list_known_strategy_seeds,
+        )
+
+        assert SeedInjectionConfig is not None
+        assert callable(build_strategy_seed)
+        assert callable(build_strategy_seeds)
+        assert callable(get_seed_template)
+        assert callable(list_known_strategy_seeds)
+        assert StrategySeedTemplate is not None
