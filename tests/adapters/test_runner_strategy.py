@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -120,6 +121,20 @@ class TestDataframeToContext:
 
 
 class TestGPStrategyAdapterConstruction:
+    def test_seed_programs_path_not_found_raises(self, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        missing = tmp_path / "missing.json"
+        with pytest.raises(AdapterError, match="Failed to read seed programs"):
+            GPStrategyAdapter(
+                PrimitiveRegistry(),
+                GPConfig(population_size=20, max_depth=4, generations=2),
+                MagicMock(),
+                seed_programs_path=missing,
+            )
+
     def test_valid_construction(self) -> None:
         from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
         from liq.gp.config import GPConfig
@@ -393,6 +408,152 @@ class TestGPStrategyAdapterWarmStart:
         # Second evolve call should have seed_programs=[program1]
         second_call = mock_evolve.call_args_list[1]
         assert second_call.kwargs.get("seed_programs") == [program1]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_seed_programs_path_is_loaded(self, mock_evolve, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        seed = _make_terminal("close")
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([serialize(seed)]), encoding="utf-8")
+
+        mock_evolve.return_value = _make_evolution_result(seed)
+        adapter = GPStrategyAdapter(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            MagicMock(),
+            seed_programs_path=path,
+        )
+        adapter.fit(_make_dataframe())
+
+        called_seed_programs = mock_evolve.call_args_list[0].kwargs["seed_programs"]
+        assert called_seed_programs == [seed]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_seed_programs_path_augment_mode(self, mock_evolve, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        seed = _make_terminal("close")
+        next_program = _make_terminal("volume")
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([serialize(seed)]), encoding="utf-8")
+
+        mock_evolve.side_effect = [
+            _make_evolution_result(seed),
+            _make_evolution_result(next_program),
+        ]
+        adapter = GPStrategyAdapter(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            MagicMock(),
+            seed_programs_path=path,
+            warm_start=True,
+            warm_start_mode="augment",
+        )
+        adapter.fit(_make_dataframe())
+        adapter.fit(_make_dataframe())
+
+        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs["seed_programs"]
+        assert second_call_seed_programs == [seed, seed]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_from_evolution_config_uses_warm_start_seed_path(
+        self,
+        mock_evolve,
+        tmp_path,
+    ) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.evolution.config import EvolutionConfig
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        seed = _make_terminal("close")
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([serialize(seed)]), encoding="utf-8")
+
+        mock_evolve.return_value = _make_evolution_result(seed)
+        evolution_config = EvolutionConfig(
+            warm_start={"seed_programs_path": path, "mode": "replace"}
+        )
+        adapter = GPStrategyAdapter.from_evolution_config(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            evolution_config,
+            MagicMock(),
+        )
+        adapter.fit(_make_dataframe())
+
+        called_seed_programs = mock_evolve.call_args.kwargs["seed_programs"]
+        assert called_seed_programs == [seed]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_from_evolution_config_uses_augment_mode(self, mock_evolve, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.evolution.config import EvolutionConfig
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        seed = _make_terminal("close")
+        next_program = _make_terminal("volume")
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([serialize(seed)]), encoding="utf-8")
+
+        mock_evolve.side_effect = [
+            _make_evolution_result(seed),
+            _make_evolution_result(next_program),
+        ]
+        evolution_config = EvolutionConfig(
+            warm_start={"seed_programs_path": path, "mode": "augment"}
+        )
+        adapter = GPStrategyAdapter.from_evolution_config(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            evolution_config,
+            MagicMock(),
+            warm_start=True,
+        )
+        adapter.fit(_make_dataframe())
+        adapter.fit(_make_dataframe())
+
+        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs["seed_programs"]
+        assert second_call_seed_programs == [seed, seed]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_from_evolution_config_seed_programs_override_path(self, mock_evolve, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.evolution.config import EvolutionConfig
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        path_seed = _make_terminal("path")
+        override_seed = _make_terminal("override")
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([serialize(path_seed)]), encoding="utf-8")
+
+        mock_evolve.return_value = _make_evolution_result(override_seed)
+        evolution_config = EvolutionConfig(
+            warm_start={"seed_programs_path": path, "mode": "replace"}
+        )
+        adapter = GPStrategyAdapter.from_evolution_config(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            evolution_config,
+            MagicMock(),
+            seed_programs=[override_seed],
+        )
+        adapter.fit(_make_dataframe())
+
+        called_seed_programs = mock_evolve.call_args.kwargs["seed_programs"]
+        assert called_seed_programs == [override_seed]
 
 
 # ------------------------------------------------------------------ #

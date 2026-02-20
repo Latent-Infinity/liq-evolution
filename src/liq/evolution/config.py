@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from liq.evolution.errors import ConfigurationError
 from liq.gp.config import FitnessConfig as LiqGPFitnessConfig
 from liq.gp.config import GPConfig as LiqGPConfig
+from liq.gp.config import SeedInjectionConfig as LiqGPSeedInjectionConfig
 
 
 class PrimitiveConfig(BaseModel, frozen=True):
@@ -131,13 +132,24 @@ class GPConfig(BaseModel, frozen=True):
     tournament_size: int = 3
     elitism_count: int = 1
     seed: int = 42
+    seed_injection: LiqGPSeedInjectionConfig | None = None
+
+    # Constant optimization
+    constant_opt_enabled: bool = True
+    constant_opt_top_k: float = 0.1
+    constant_opt_max_iter: int = 50
+    constant_opt_max_time_seconds: float = 1.0
+
+    # Simplification & semantic dedup
+    simplification_enabled: bool = True
+    semantic_dedup_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_gp_config(self) -> Self:
-        if self.population_size < 1:
-            raise ConfigurationError("population_size must be >= 1")
-        if self.max_depth < 1:
-            raise ConfigurationError("max_depth must be >= 1")
+        if self.population_size < 10:
+            raise ConfigurationError("population_size must be >= 10")
+        if self.max_depth < 2:
+            raise ConfigurationError("max_depth must be >= 2")
         if self.generations < 1:
             raise ConfigurationError("generations must be >= 1")
         if not 0.0 <= self.mutation_rate <= 1.0:
@@ -152,6 +164,20 @@ class GPConfig(BaseModel, frozen=True):
         total_rate = self.crossover_rate + self.mutation_rate
         if total_rate > 1.0:
             raise ConfigurationError("crossover_rate + mutation_rate must be <= 1.0")
+
+        if self.constant_opt_top_k <= 0.0 or self.constant_opt_top_k > 1.0:
+            raise ConfigurationError("constant_opt_top_k must be in (0.0, 1.0]")
+        if self.constant_opt_max_time_seconds <= 0:
+            raise ConfigurationError("constant_opt_max_time_seconds must be > 0")
+
+        if self.seed_injection is not None:
+            max_replaceable = self.population_size - self.elitism_count
+            if self.seed_injection.count > max_replaceable:
+                raise ConfigurationError(
+                    f"seed_injection.count ({self.seed_injection.count}) must be "
+                    f"<= population_size - elitism_count ({max_replaceable})"
+                )
+
         return self
 
 
@@ -188,6 +214,9 @@ class EvolutionConfig(BaseModel, frozen=True):
         max_depth: Maximum depth of GP program trees.
         generations: Number of evolution generations to run.
         seed: Random seed for reproducibility.
+        gp.population_size, gp.max_depth, gp.generations, gp.seed:
+            Duplicate compatibility fields that must match top-level values when
+            set explicitly.  The top-level values are the source of truth.
         primitives: Primitive category configuration.
         fitness_stages: Fitness evaluation stage configuration.
         parallel: Parallel evaluation configuration.
@@ -208,6 +237,21 @@ class EvolutionConfig(BaseModel, frozen=True):
 
     @model_validator(mode="after")
     def _validate_evolution(self) -> Self:
+        local = self.gp
+        local_fields = getattr(local, "model_fields_set", set())
+        conflicting_fields = {
+            field
+            for field in {"population_size", "max_depth", "generations", "seed"}
+            if field in local_fields and getattr(self, field) != getattr(local, field)
+        }
+        if conflicting_fields:
+            conflict_csv = ", ".join(sorted(conflicting_fields))
+            raise ConfigurationError(
+                "EvolutionConfig top-level and nested GPConfig values must match for "
+                "population_size, max_depth, generations, and seed "
+                f"when set explicitly in gp; conflicts: {conflict_csv}"
+            )
+
         if self.population_size < 10:
             raise ConfigurationError("population_size must be >= 10")
         if self.max_depth < 2:
@@ -256,6 +300,13 @@ def build_gp_config(evo: EvolutionConfig) -> LiqGPConfig:
         hoist_mutation_rate=0.1 * mr,
         tournament_size=max(local.tournament_size, 2),
         elitism_count=local.elitism_count,
+        seed_injection=local.seed_injection,
+        constant_opt_enabled=local.constant_opt_enabled,
+        constant_opt_top_k=local.constant_opt_top_k,
+        constant_opt_max_iter=local.constant_opt_max_iter,
+        constant_opt_max_time_seconds=local.constant_opt_max_time_seconds,
+        simplification_enabled=local.simplification_enabled,
+        semantic_dedup_enabled=local.semantic_dedup_enabled,
         fitness=LiqGPFitnessConfig(
             batch_size=evo.batch_size,
             full_eval_interval=evo.full_eval_interval,

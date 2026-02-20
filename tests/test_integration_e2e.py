@@ -20,8 +20,10 @@ from liq.evolution.primitives.registry import build_trading_registry
 from liq.evolution.primitives.series_sources import prepare_evaluation_context
 from liq.evolution.protocols import GPStrategy
 from liq.gp.config import GPConfig as LiqGPConfig
+from liq.gp.config import SeedInjectionConfig
+from liq.gp.program.ast import FunctionNode, TerminalNode
 from liq.gp.program.eval import evaluate as gp_evaluate
-from liq.gp.types import EvolutionResult
+from liq.gp.types import EvolutionResult, Series
 
 
 def _small_gp_config(*, seed: int = 42) -> LiqGPConfig:
@@ -338,3 +340,136 @@ class TestPhase3PublicExports:
         ]
         for name in expected:
             assert name in liq.evolution.__all__, f"{name} not in __all__"
+
+
+def _make_bool_series_seeds(registry_obj) -> list:
+    """Build simple BoolSeries seeds from comparison ops (no liq-ta needed).
+
+    Creates ``close > open`` and ``high > low`` programs.
+    """
+    gt = registry_obj.get("gt")
+    close_node = TerminalNode(name="close", output_type=Series)
+    open_node = TerminalNode(name="open", output_type=Series)
+    high_node = TerminalNode(name="high", output_type=Series)
+    low_node = TerminalNode(name="low", output_type=Series)
+    return [
+        FunctionNode(gt, (close_node, open_node)),  # close > open
+        FunctionNode(gt, (high_node, low_node)),  # high > low
+    ]
+
+
+class TestSeedInjectionThroughAdapterE2E:
+    """Periodic seed injection works end-to-end through the adapter."""
+
+    def test_fit_with_ramped_injection(self) -> None:
+        """GPStrategyAdapter.fit() with ramped injection (no seeds needed)."""
+        config = PrimitiveConfig(enable_liq_ta=False)
+        registry = build_trading_registry(config)
+        gp_config = LiqGPConfig(
+            population_size=20,
+            max_depth=4,
+            generations=4,
+            seed=42,
+            tournament_size=3,
+            elitism_count=2,
+            constant_opt_enabled=False,
+            semantic_dedup_enabled=False,
+            simplification_enabled=False,
+            seed_injection=SeedInjectionConfig(
+                method="ramped",
+                count=2,
+                interval=1,
+            ),
+        )
+        evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
+
+        adapter = GPStrategyAdapter(registry, gp_config, evaluator)
+
+        features = _make_features(30)
+        labels = _make_labels(features)
+        adapter.fit(features, labels)
+
+        assert adapter.program is not None
+        result = adapter.evolution_result
+        assert result is not None
+        total_injected = sum(s.injected_count for s in result.fitness_history)
+        # Injection fires on generations 1, 2, 3 (not gen 0)
+        assert total_injected > 0, (
+            f"Expected injected_count > 0 with seed_injection enabled, "
+            f"got {total_injected}"
+        )
+
+    def test_fit_with_direct_seed_injection(self) -> None:
+        """Direct injection cycles BoolSeries seeds through evolution."""
+        config = PrimitiveConfig(enable_liq_ta=False)
+        registry = build_trading_registry(config)
+        seeds = _make_bool_series_seeds(registry)
+        gp_config = LiqGPConfig(
+            population_size=20,
+            max_depth=4,
+            generations=4,
+            seed=42,
+            tournament_size=3,
+            elitism_count=2,
+            constant_opt_enabled=False,
+            semantic_dedup_enabled=False,
+            simplification_enabled=False,
+            seed_injection=SeedInjectionConfig(
+                method="direct",
+                count=2,
+                interval=1,
+            ),
+        )
+        evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
+
+        adapter = GPStrategyAdapter(registry, gp_config, evaluator, seed_programs=seeds)
+
+        features = _make_features(30)
+        labels = _make_labels(features)
+        adapter.fit(features, labels)
+
+        assert adapter.program is not None
+        result = adapter.evolution_result
+        assert result is not None
+        total_injected = sum(s.injected_count for s in result.fitness_history)
+        assert total_injected > 0, (
+            f"Expected injected_count > 0 with direct injection, got {total_injected}"
+        )
+
+    def test_fit_with_variation_seed_injection(self) -> None:
+        """Variation injection mutates BoolSeries seeds through evolution."""
+        config = PrimitiveConfig(enable_liq_ta=False)
+        registry = build_trading_registry(config)
+        seeds = _make_bool_series_seeds(registry)
+        gp_config = LiqGPConfig(
+            population_size=20,
+            max_depth=4,
+            generations=4,
+            seed=42,
+            tournament_size=3,
+            elitism_count=2,
+            constant_opt_enabled=False,
+            semantic_dedup_enabled=False,
+            simplification_enabled=False,
+            seed_injection=SeedInjectionConfig(
+                method="variation",
+                count=2,
+                interval=1,
+            ),
+        )
+        evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
+
+        adapter = GPStrategyAdapter(registry, gp_config, evaluator, seed_programs=seeds)
+
+        features = _make_features(30)
+        labels = _make_labels(features)
+        adapter.fit(features, labels)
+
+        assert adapter.program is not None
+        result = adapter.evolution_result
+        assert result is not None
+        total_injected = sum(s.injected_count for s in result.fitness_history)
+        assert total_injected > 0, (
+            f"Expected injected_count > 0 with variation injection, "
+            f"got {total_injected}"
+        )

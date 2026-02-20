@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import polars as pl
 
 from liq.evolution.adapters.parallel_eval import Evaluator, ParallelEvaluator
 from liq.evolution.adapters.signal_output import GPSignalOutput
-from liq.evolution.config import ParallelConfig
+from liq.evolution.config import EvolutionConfig, ParallelConfig
 from liq.evolution.errors import AdapterError, SerializationError
 from liq.gp.config import GPConfig as LiqGPConfig
 from liq.gp.evolution.engine import evolve
@@ -51,21 +53,31 @@ class GPStrategyAdapter:
         *,
         seed_programs: Sequence[Program] | None = None,
         warm_start: bool = False,
+        warm_start_mode: Literal["replace", "augment"] = "replace",
+        seed_programs_path: str | Path | None = None,
         parallel_config: ParallelConfig | None = None,
     ) -> None:
         self._registry = registry
         self._gp_config = gp_config
         self._evaluator = evaluator
-        self._seed_programs = seed_programs
+        if seed_programs is not None:
+            self._seed_programs = list(seed_programs)
+        else:
+            self._seed_programs = (
+                _load_seed_programs(seed_programs_path, registry)
+                if seed_programs_path is not None
+                else None
+            )
         self._warm_start = warm_start
+        self._warm_start_mode = warm_start_mode
         self._parallel_config = parallel_config
         self._program: Program | None = None
         self._evolution_result: EvolutionResult | None = None
 
         # Validate seeds at construction (fail-fast)
-        if seed_programs is not None:
+        if self._seed_programs is not None:
             validate_seed_programs(
-                seed_programs,
+                self._seed_programs,
                 gp_config,
                 registry=registry,
             )
@@ -122,7 +134,10 @@ class GPStrategyAdapter:
         self._evolution_result = result
 
         if self._warm_start:
-            self._seed_programs = [result.best_program]
+            if self._warm_start_mode == "augment" and self._seed_programs is not None:
+                self._seed_programs = [*self._seed_programs, result.best_program]
+            else:
+                self._seed_programs = [result.best_program]
 
     def predict(self, features: pl.DataFrame) -> GPSignalOutput:
         """Generate predictions from features.
@@ -223,3 +238,107 @@ class GPStrategyAdapter:
         adapter = cls(registry=registry, gp_config=gp_config, evaluator=None)
         adapter._program = program
         return adapter
+
+    @classmethod
+    def from_evolution_config(
+        cls,
+        registry: PrimitiveRegistry,
+        gp_config: GPConfig,
+        evolution_config: EvolutionConfig,
+        evaluator: object | None = None,
+        *,
+        seed_programs: Sequence[Program] | None = None,
+        warm_start: bool = False,
+        parallel_config: ParallelConfig | None = None,
+    ) -> GPStrategyAdapter:
+        """Create an adapter from an EvolutionConfig using warm-start settings.
+
+        Args:
+            registry: GP primitive registry.
+            gp_config: GP configuration for evolution.
+            evolution_config: Evolution pipeline config providing warm-start
+                defaults (seed path and mode).
+            evaluator: Optional evaluator used during fitting.
+            seed_programs: Explicit seed programs (takes precedence over path-based
+                seeds from ``evolution_config``).
+            warm_start: Whether to use latest evolved programs as warm seeds in
+                subsequent fits.
+            parallel_config: Optional parallel evaluation config.
+        """
+        warm_start_config = evolution_config.warm_start
+        return cls(
+            registry=registry,
+            gp_config=gp_config,
+            evaluator=evaluator,
+            seed_programs=seed_programs,
+            warm_start=warm_start,
+            warm_start_mode=warm_start_config.mode,
+            seed_programs_path=warm_start_config.seed_programs_path,
+            parallel_config=parallel_config,
+        )
+
+
+def _load_seed_programs(
+    seed_programs_path: str | Path | None,
+    registry: PrimitiveRegistry,
+) -> list[Program]:
+    """Load seed programs from JSON.
+
+    Supported payload formats:
+    - ``[program, ...]``
+    - ``{"seed_programs": [program, ...]}``
+    - ``{"best_program": program}``
+    - ``{"pareto_front": [program, ...]}``
+    - ``{"entry_program": program}``
+    """
+    if seed_programs_path is None:
+        return []
+
+    path = Path(seed_programs_path)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise AdapterError(f"Failed to read seed programs from {path!s}: {exc}") from exc
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise AdapterError(f"Invalid JSON in seed programs path {path!s}: {exc}") from exc
+
+    if isinstance(payload, dict):
+        if "seed_programs" in payload:
+            payload = payload["seed_programs"]
+        elif "best_program" in payload:
+            payload = [payload["best_program"]]
+        elif "pareto_front" in payload:
+            payload = payload["pareto_front"]
+        elif "entry_program" in payload:
+            payload = [payload["entry_program"]]
+        else:
+            raise AdapterError(
+                f"Unsupported seed payload for {path!s}; expected "
+                "list, seed_programs, best_program, pareto_front, or entry_program"
+            )
+
+    if not isinstance(payload, list):
+        raise AdapterError(
+            f"Unsupported seed payload for {path!s}; expected list of program payloads"
+        )
+    if not payload:
+        raise AdapterError(f"No seed programs found in {path!s}")
+
+    seed_programs: list[Program] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise AdapterError(
+                f"Seed item at index {index} in {path!s} is not a program payload"
+            )
+        try:
+            program = deserialize(item, registry)
+        except Exception as exc:
+            raise AdapterError(
+                f"Failed to deserialize seed item at index {index} from {path!s}"
+            ) from exc
+        seed_programs.append(program)
+
+    return seed_programs
