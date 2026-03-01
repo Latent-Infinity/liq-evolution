@@ -13,6 +13,13 @@ from liq.evolution.errors import FitnessEvaluationError
 from liq.gp.program.ast import Program
 from liq.gp.program.eval import evaluate as gp_evaluate
 from liq.gp.types import FitnessResult
+from liq.evolution.fitness.evaluation_schema import (
+    METADATA_KEY_BEHAVIOR_DESCRIPTORS,
+    METADATA_KEY_CONSTRAINT_VIOLATIONS,
+    METADATA_KEY_PER_SPLIT_METRICS,
+    METADATA_KEY_RAW_OBJECTIVES,
+    METADATA_KEY_SLICE_SCORES,
+)
 
 
 class _ProgramStrategy:
@@ -62,6 +69,36 @@ class BacktestFitnessEvaluator:
     ) -> list[FitnessResult]:
         return self.evaluate(programs, context)
 
+    def _make_metadata(
+        self,
+        *,
+        metric_value: float,
+        n_folds: int,
+        fold_values: list[float],
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Build metadata payload matching phase-0 contract."""
+        fold_metrics = {
+            f"fold:{idx}": {"metric": value}
+            for idx, value in enumerate(fold_values)
+        }
+        metadata: dict[str, Any] = {
+            "metric": self._metric,
+            "n_folds": n_folds,
+            "fold_values": fold_values,
+            METADATA_KEY_PER_SPLIT_METRICS: {
+                "all": {"metric": metric_value},
+                **fold_metrics,
+            },
+            METADATA_KEY_RAW_OBJECTIVES: (metric_value,),
+            METADATA_KEY_BEHAVIOR_DESCRIPTORS: {},
+            METADATA_KEY_CONSTRAINT_VIOLATIONS: {},
+            METADATA_KEY_SLICE_SCORES: {},
+        }
+        if reason is not None:
+            metadata["reason"] = reason
+        return metadata
+
     def _evaluate_single(self, program: Program) -> FitnessResult:
         strategy = _ProgramStrategy(program)
 
@@ -73,7 +110,12 @@ class BacktestFitnessEvaluator:
         if not fold_results:
             return FitnessResult(
                 objectives=(0.0,),
-                metadata={"metric": self._metric, "reason": "no_folds"},
+                metadata=self._make_metadata(
+                    metric_value=0.0,
+                    n_folds=0,
+                    fold_values=[],
+                    reason="no_folds",
+                ),
             )
 
         metric_values: list[float] = []
@@ -86,15 +128,20 @@ class BacktestFitnessEvaluator:
         if not metric_values:
             return FitnessResult(
                 objectives=(0.0,),
-                metadata={"metric": self._metric, "reason": "metric_missing"},
+                metadata=self._make_metadata(
+                    metric_value=0.0,
+                    n_folds=len(fold_results),
+                    fold_values=[],
+                    reason="metric_missing",
+                ),
             )
 
         avg_metric = float(np.mean(metric_values))
         return FitnessResult(
             objectives=(avg_metric,),
-            metadata={
-                "metric": self._metric,
-                "n_folds": len(fold_results),
-                "fold_values": metric_values,
-            },
+            metadata=self._make_metadata(
+                metric_value=avg_metric,
+                n_folds=len(fold_results),
+                fold_values=metric_values,
+            ),
         )

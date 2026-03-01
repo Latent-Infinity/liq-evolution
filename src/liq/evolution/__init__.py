@@ -35,12 +35,16 @@ from liq.evolution.errors import (
 )
 from liq.evolution.evolution.engine import evolve
 from liq.evolution.fitness.label_metrics import LabelFitnessEvaluator
+from liq.evolution.fitness.eval_cache import FitnessEvaluationCache  # noqa: F401
+from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
 from liq.evolution.fitness.objectives import wire_objectives
 from liq.evolution.fitness.runner_backtest import BacktestFitnessEvaluator
+from liq.evolution.fitness.strategy_evaluator import StrategyEvaluator
 from liq.evolution.fitness.two_stage import TwoStageFitnessEvaluator
 from liq.evolution.primitives.feature_context import FeatureContext
 from liq.evolution.primitives.registry import build_trading_registry
 from liq.evolution.primitives.series_sources import prepare_evaluation_context
+from liq.evolution.qd import QDEvolutionResult, run_qd_evolution
 from liq.evolution.program import (
     ConstantNode,
     EvaluationContext,
@@ -114,8 +118,13 @@ __all__ = [
     # Fitness
     "LabelFitnessEvaluator",
     "BacktestFitnessEvaluator",
+    "FitnessEvaluationCache",
+    "MultiFidelityFitnessEvaluator",
     "TwoStageFitnessEvaluator",
+    "StrategyEvaluator",
     "wire_objectives",
+    "run_qd_evolution",
+    "QDEvolutionResult",
     # Adapters
     "GPStrategyAdapter",
     "GPSignalOutput",
@@ -133,4 +142,4 @@ __all__ = [
     "FitnessError",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

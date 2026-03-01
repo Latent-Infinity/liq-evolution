@@ -90,6 +90,11 @@ class TestSubpackageImports:
 
         assert callable(wire_objectives)
 
+    def test_fitness_strategy_evaluator(self) -> None:
+        from liq.evolution.fitness.strategy_evaluator import StrategyEvaluator
+
+        assert StrategyEvaluator is not None
+
     def test_adapters_runner_strategy(self) -> None:
         from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
 
@@ -141,6 +146,7 @@ class TestPublicAPIReexports:
             PrimitiveConfig,
             SerializationConfig,
             WarmStartConfig,
+            StrategyEvaluator,
         )
 
         assert EvolutionConfig is not None
@@ -151,6 +157,7 @@ class TestPublicAPIReexports:
         assert GPConfig is not None
         assert FitnessConfig is not None
         assert SerializationConfig is not None
+        assert StrategyEvaluator is not None
 
     def test_protocol_exports(self) -> None:
         from liq.evolution import (
@@ -223,3 +230,11 @@ class TestPublicAPIReexports:
         assert callable(get_seed_template)
         assert callable(list_known_strategy_seeds)
         assert StrategySeedTemplate is not None
+
+    def test_qd_exports(self) -> None:
+        from liq.evolution import QDEvolutionResult, run_qd_evolution
+        from liq.evolution import qd
+
+        assert callable(run_qd_evolution)
+        assert QDEvolutionResult is not None
+        assert hasattr(qd, "run_qd_evolution")

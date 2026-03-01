@@ -137,6 +137,8 @@ class GPConfig(BaseModel, frozen=True):
     # Constant optimization
     constant_opt_enabled: bool = True
     constant_opt_top_k: float = 0.1
+    constant_opt_mode: Literal["top_k", "probabilistic"] = "top_k"
+    constant_opt_max_evals: int | None = None
     constant_opt_max_iter: int = 50
     constant_opt_max_time_seconds: float = 1.0
 
@@ -167,6 +169,12 @@ class GPConfig(BaseModel, frozen=True):
 
         if self.constant_opt_top_k <= 0.0 or self.constant_opt_top_k > 1.0:
             raise ConfigurationError("constant_opt_top_k must be in (0.0, 1.0]")
+        if self.constant_opt_mode not in {"top_k", "probabilistic"}:
+            raise ConfigurationError(
+                "constant_opt_mode must be 'top_k' or 'probabilistic'"
+            )
+        if self.constant_opt_max_evals is not None and self.constant_opt_max_evals < 1:
+            raise ConfigurationError("constant_opt_max_evals must be >= 1 when set")
         if self.constant_opt_max_time_seconds <= 0:
             raise ConfigurationError("constant_opt_max_time_seconds must be > 0")
 
@@ -184,6 +192,10 @@ class GPConfig(BaseModel, frozen=True):
 class FitnessConfig(BaseModel, frozen=True):
     """Canonical phase-0 configuration for fitness-stage control."""
 
+    objectives: tuple[str, ...] = ("fitness",)
+    objective_directions: tuple[Literal["maximize", "minimize"], ...] = (
+        "maximize",
+    )
     metric: Literal["f1", "precision_at_k", "accuracy"] = "f1"
     stage_a_metric: Literal["f1", "precision_at_k", "accuracy"] = "f1"
     stage_b_enabled: bool = False
@@ -191,6 +203,18 @@ class FitnessConfig(BaseModel, frozen=True):
 
     @model_validator(mode="after")
     def _validate_fitness_config(self) -> Self:
+        if not self.objectives:
+            raise ConfigurationError("objectives must be non-empty")
+        if len(self.objectives) != len(self.objective_directions):
+            raise ConfigurationError(
+                "len(objectives) must equal len(objective_directions)"
+            )
+        for idx, direction in enumerate(self.objective_directions):
+            if direction not in {"maximize", "minimize"}:
+                raise ConfigurationError(
+                    f"objective_directions[{idx}] must be 'maximize' or 'minimize'"
+                )
+
         if self.top_k_for_backtest < 1:
             raise ConfigurationError("top_k_for_backtest must be >= 1")
         return self
@@ -231,6 +255,7 @@ class EvolutionConfig(BaseModel, frozen=True):
     full_eval_interval: int = 10
     primitives: PrimitiveConfig = PrimitiveConfig()
     fitness_stages: FitnessStageConfig = FitnessStageConfig()
+    fitness: FitnessConfig = FitnessConfig()
     parallel: ParallelConfig = ParallelConfig()
     gp: GPConfig = Field(default_factory=GPConfig)
     warm_start: WarmStartConfig = WarmStartConfig()
@@ -303,11 +328,15 @@ def build_gp_config(evo: EvolutionConfig) -> LiqGPConfig:
         seed_injection=local.seed_injection,
         constant_opt_enabled=local.constant_opt_enabled,
         constant_opt_top_k=local.constant_opt_top_k,
+        constant_opt_mode=local.constant_opt_mode,
+        constant_opt_max_evals=local.constant_opt_max_evals,
         constant_opt_max_iter=local.constant_opt_max_iter,
         constant_opt_max_time_seconds=local.constant_opt_max_time_seconds,
         simplification_enabled=local.simplification_enabled,
         semantic_dedup_enabled=local.semantic_dedup_enabled,
         fitness=LiqGPFitnessConfig(
+            objectives=list(evo.fitness.objectives),
+            objective_directions=list(evo.fitness.objective_directions),
             batch_size=evo.batch_size,
             full_eval_interval=evo.full_eval_interval,
         ),

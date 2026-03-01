@@ -8,6 +8,14 @@ from liq.evolution.errors import FitnessError
 from liq.gp.program.ast import Program
 from liq.gp.program.eval import evaluate
 from liq.gp.types import FitnessResult
+from liq.evolution.fitness.evaluation_schema import (
+    BEHAVIOR_DESCRIPTOR_TURNOVER,
+    METADATA_KEY_BEHAVIOR_DESCRIPTORS,
+    METADATA_KEY_CONSTRAINT_VIOLATIONS,
+    METADATA_KEY_PER_SPLIT_METRICS,
+    METADATA_KEY_RAW_OBJECTIVES,
+    METADATA_KEY_SLICE_SCORES,
+)
 
 
 class LabelFitnessEvaluator:
@@ -104,7 +112,17 @@ class LabelFitnessEvaluator:
         if not np.any(valid_mask):
             return FitnessResult(
                 objectives=(0.0,),
-                metadata={"metric": self._metric, "reason": "all_nan"},
+                metadata={
+                    "metric": self._metric,
+                    "reason": "all_nan",
+                    METADATA_KEY_PER_SPLIT_METRICS: {"all": {"metric": 0.0}},
+                    METADATA_KEY_RAW_OBJECTIVES: (0.0,),
+                    METADATA_KEY_BEHAVIOR_DESCRIPTORS: {
+                        BEHAVIOR_DESCRIPTOR_TURNOVER: 0.0,
+                    },
+                    METADATA_KEY_CONSTRAINT_VIOLATIONS: {},
+                    METADATA_KEY_SLICE_SCORES: {},
+                },
             )
 
         # Replace NaN with -inf so they never rank as positive
@@ -117,16 +135,32 @@ class LabelFitnessEvaluator:
             metric_value = self._f1(clean_scores, labels)
         else:  # accuracy
             metric_value = self._accuracy(clean_scores, labels)
+        raw_metric = float(metric_value)
 
         # Apply turnover penalty
+        turnover = 0.0
         if self._turnover_weight > 0.0:
             turnover = self._compute_turnover(clean_scores)
             metric_value = metric_value * (1.0 - self._turnover_weight * turnover)
             metric_value = max(0.0, metric_value)
+        metric_value = float(metric_value)
 
         return FitnessResult(
             objectives=(metric_value,),
-            metadata={"metric": self._metric},
+            metadata={
+                "metric": self._metric,
+                METADATA_KEY_PER_SPLIT_METRICS: {
+                    "all": {
+                        "metric": metric_value,
+                    },
+                },
+                METADATA_KEY_RAW_OBJECTIVES: (raw_metric,),
+                METADATA_KEY_BEHAVIOR_DESCRIPTORS: {
+                    BEHAVIOR_DESCRIPTOR_TURNOVER: float(turnover),
+                },
+                METADATA_KEY_CONSTRAINT_VIOLATIONS: {},
+                METADATA_KEY_SLICE_SCORES: {},
+            },
         )
 
     def _get_predictions(self, scores: np.ndarray) -> np.ndarray:

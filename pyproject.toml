@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "liq-evolution"
-version = "0.1.1"
+version = "0.1.2"
 description = "Trading strategy evolution layer for the LIQ Stack"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "liq-gp>=0.1.1",
     "liq-core>=0.1.0",
+    "liq-sim>=0.1.0",
     "liq-signals>=0.1.0",
     "liq-ta>=0.1.0",
     "numpy>=1.26",
@@ -62,6 +63,7 @@ dev = [
 liq-gp = { path = "../liq-gp", editable = true }
 liq-ta = { path = "../liq-ta/crates/liq-ta-python", editable = true }
 liq-core = { path = "../liq-core", editable = true }
+liq-sim = { path = "../liq-sim", editable = true }
 liq-signals = { path = "../liq-signals", editable = true }
 
 [tool.hatch.build.targets.wheel]
@@ -106,6 +108,7 @@ indent-style = "space"
 extra-paths = [
     "./src",
     "../liq-core/src",
+    "../liq-sim/src",
     "../liq-gp/src",
     "../liq-signals/src",
     "../liq-ta/crates/liq-ta-python/src",

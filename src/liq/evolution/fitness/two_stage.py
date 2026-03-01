@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from liq.gp.program.ast import Program
     from liq.gp.types import FitnessResult
 
+from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
+
 
 class TwoStageFitnessEvaluator:
     """Two-stage fitness evaluator.
@@ -44,6 +46,17 @@ class TwoStageFitnessEvaluator:
         self._stage_a = stage_a
         self._stage_b = stage_b
         self._top_k = top_k
+        if stage_b is None:
+            levels = [stage_a]
+        else:
+            levels = [stage_a, stage_b]
+        self._pipeline = MultiFidelityFitnessEvaluator(
+            levels=levels,
+            top_k_per_level=top_k,
+            objective_directions=("maximize",),
+            promotion_strategy="direction_aware_first",
+            level_costs=(1.0, 2.0) if stage_b is not None else (1.0,),
+        )
 
     def evaluate(
         self,
@@ -59,31 +72,7 @@ class TwoStageFitnessEvaluator:
         Returns:
             Fitness results for each program, in input order.
         """
-        # Stage A: evaluate all programs
-        a_results = self._stage_a.evaluate(programs, context)
-
-        if self._stage_b is None or len(programs) == 0:
-            return a_results
-
-        # Select top K by first objective (descending)
-        k = min(self._top_k, len(programs))
-        indexed = sorted(
-            range(len(a_results)),
-            key=lambda i: a_results[i].objectives[0],
-            reverse=True,
-        )
-        top_k_indices = indexed[:k]
-
-        # Stage B: evaluate top K only
-        top_k_programs = [programs[i] for i in top_k_indices]
-        b_results = self._stage_b.evaluate(top_k_programs, context)
-
-        # Merge: top K get Stage B results, rest keep Stage A
-        final = list(a_results)
-        for local_idx, global_idx in enumerate(top_k_indices):
-            final[global_idx] = b_results[local_idx]
-
-        return final
+        return self._pipeline.evaluate(programs, context)
 
     def evaluate_fitness(
         self,

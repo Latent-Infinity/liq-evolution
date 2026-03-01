@@ -180,3 +180,28 @@ uv run ruff check src/ tests/          # lint
 uv run ruff format src/ tests/         # format
 uv run ty check src/                   # type check
 ```
+
+## Operational Notes (Phase 6 hardening)
+
+- **Walk-forward split failures**
+  - Missing or malformed split metadata in `WalkForwardSplit` is validated before
+    evaluation; invalid folds are rejected before market simulation starts.
+  - `FoldResult.slice_id` is propagated to evaluator metadata and used as the
+    cache key to keep walk-forward reuse behavior stable.
+- **Evaluator contract faults**
+  - Lexicase selection (`selection_mode=lexicase`) requires
+    `METADATA_KEY_SLICE_SCORES` and a parseable `METADATA_KEY_RAW_OBJECTIVES`
+    tuple. A mismatch raises `ValueError` early.
+  - Constraint violations appear in `METADATA_KEY_CONSTRAINT_VIOLATIONS` and are
+    added as additional slice-score penalty cases.
+- **Evaluation cache behavior**
+  - Cache key is `(strategy_hash, slice_id, evaluator_fingerprint)`.
+  - Config hashes include objective names/directions, split behavior, cost-model
+    options, and descriptor schema version.
+  - Cache misses are expected when objective sets or schema versions change; this
+    prevents stale reuse across experiment variants.
+- **Multi-fidelity control**
+  - Expensive levels should only evaluate promoted candidates. If promotion
+    thresholds or strategy budgeting are too aggressive/lenient, coverage and
+    sample quality degrade. Verify `top_k_per_level`, promotion strategy, and
+    level ordering for your domain.
