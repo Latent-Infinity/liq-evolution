@@ -141,5 +141,3 @@ __all__ = [
     "SerializationError",
     "FitnessError",
 ]
-
-__version__ = "0.1.2"

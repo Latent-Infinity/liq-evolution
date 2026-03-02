@@ -11,7 +11,7 @@ class TestSubpackageImports:
     def test_root_package(self) -> None:
         import liq.evolution
 
-        assert hasattr(liq.evolution, "__version__")
+        assert hasattr(liq.evolution, "__all__")
 
     def test_config_module(self) -> None:
         from liq.evolution import config
@@ -182,7 +182,6 @@ class TestPublicAPIReexports:
             LiqEvolutionError,
             ParallelExecutionError,
             PrimitiveSetupError,
-            __version__,
         )
 
         assert LiqEvolutionError is not None
@@ -191,7 +190,6 @@ class TestPublicAPIReexports:
         assert AdapterError is not None
         assert ConfigurationError is not None
         assert ParallelExecutionError is not None
-        assert isinstance(__version__, str)
 
     def test_phase4_genome_exports(self) -> None:
         from liq.evolution import (

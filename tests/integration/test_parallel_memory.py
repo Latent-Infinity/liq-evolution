@@ -47,3 +47,58 @@ def test_parallel_evaluate_keeps_context_schema_for_large_input() -> None:
     assert len(results) == 16
     assert all(result["metadata"]["payload_len"] == 10_000 for result in results)
     assert all(result["metadata"]["phase"] == "stress" for result in results)
+
+
+def test_no_unbounded_memory_growth_over_repeated_evaluations() -> None:
+    """Memory must not grow unboundedly when the same evaluator runs many iterations.
+
+    Uses tracemalloc to measure peak memory across N iterations of a fixed-size
+    batch.  The cache is bounded (max_entries=32) so old payloads are evicted.
+    We allow a generous tolerance but reject clearly linear growth.
+    """
+    import tracemalloc
+
+    from liq.evolution.fitness.eval_cache import FitnessEvaluationCache
+
+    tracemalloc.start()
+
+    cache = FitnessEvaluationCache(max_entries=32)
+    evaluator = _LargePayloadEvaluator(payload_size=5_000)
+    wrapper = ParallelEvaluator(evaluator=evaluator, backend="sequential")
+
+    programs = list(range(48))
+    context: dict[str, Any] = {"labels": np.arange(48)}
+    n_iterations = 20
+
+    # Warm up (let allocator reach steady state)
+    for _ in range(3):
+        wrapper.evaluate_batch(programs, context)
+
+    _, baseline_peak = tracemalloc.get_traced_memory()
+    tracemalloc.reset_peak()
+
+    for i in range(n_iterations):
+        results = wrapper.evaluate_batch(programs, context)
+        # Exercise the cache with unique keys so LRU eviction is triggered.
+        for j, result in enumerate(results):
+            cache.put(
+                strategy_hash=f"prog_{j}",
+                slice_id=f"iter_{i}",
+                evaluator_fingerprint="fp",
+                payload=result,
+            )
+
+    _, final_peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # Cache should be bounded.
+    assert cache.entries <= 32
+
+    # Peak memory after iterations should not be dramatically larger than
+    # baseline.  We allow up to 3× to account for allocator fragmentation
+    # and transient peaks, but reject truly unbounded growth (which would
+    # scale linearly with n_iterations × payload_size).
+    assert final_peak < baseline_peak * 3, (
+        f"Suspected unbounded memory growth: baseline_peak={baseline_peak}, "
+        f"final_peak={final_peak}"
+    )
