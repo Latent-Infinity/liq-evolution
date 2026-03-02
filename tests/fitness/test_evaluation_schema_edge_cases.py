@@ -17,9 +17,7 @@ from liq.evolution.fitness.evaluation_schema import (
 
 def _valid_metadata() -> dict:
     return {
-        METADATA_KEY_PER_SPLIT_METRICS: {
-            "split:a": {"train": 0.1, "val": 0.2}
-        },
+        METADATA_KEY_PER_SPLIT_METRICS: {"split:a": {"train": 0.1, "val": 0.2}},
         METADATA_KEY_RAW_OBJECTIVES: (1.0,),
         METADATA_KEY_BEHAVIOR_DESCRIPTORS: {
             "holding_period_proxy": 0.5,
@@ -51,9 +49,7 @@ class TestPerSplitMetricsValidation:
     def test_non_mapping_per_split_metrics(self) -> None:
         metadata = _valid_metadata()
         metadata[METADATA_KEY_PER_SPLIT_METRICS] = "bad"
-        errors = validate_evaluation_metadata(
-            metadata, expected_objective_count=1
-        )
+        errors = validate_evaluation_metadata(metadata, expected_objective_count=1)
         assert any(
             err.field == METADATA_KEY_PER_SPLIT_METRICS
             and "dict[str, dict[str, float]]" in err.message
@@ -63,12 +59,8 @@ class TestPerSplitMetricsValidation:
     def test_non_string_split_id_in_per_split_metrics(self) -> None:
         metadata = _valid_metadata()
         metadata[METADATA_KEY_PER_SPLIT_METRICS] = {123: {"train": 0.1}}
-        errors = validate_evaluation_metadata(
-            metadata, expected_objective_count=1
-        )
-        assert any(
-            "split ids must be strings" in err.message for err in errors
-        )
+        errors = validate_evaluation_metadata(metadata, expected_objective_count=1)
+        assert any("split ids must be strings" in err.message for err in errors)
 
 
 class TestDictStrToFloatValidation:
@@ -93,8 +85,7 @@ class TestDictStrToFloatValidation:
             require_slice_scores=True,
         )
         assert any(
-            err.field == METADATA_KEY_SLICE_SCORES
-            and "must be a dict" in err.message
+            err.field == METADATA_KEY_SLICE_SCORES and "must be a dict" in err.message
             for err in errors
         )
 
@@ -111,8 +102,7 @@ class TestRequiredSliceScoresMissing:
             require_slice_scores=True,
         )
         assert any(
-            "is required when selection uses lexicase" in err.message
-            for err in errors
+            "is required when selection uses lexicase" in err.message for err in errors
         )
 
 
@@ -122,12 +112,9 @@ class TestConstraintViolationsValidation:
     def test_negative_constraint_violation_value(self) -> None:
         metadata = _valid_metadata()
         metadata[METADATA_KEY_CONSTRAINT_VIOLATIONS] = {"test_v": -0.5}
-        errors = validate_evaluation_metadata(
-            metadata, expected_objective_count=1
-        )
+        errors = validate_evaluation_metadata(metadata, expected_objective_count=1)
         assert any(
-            "violation values should be non-negative" in err.message
-            for err in errors
+            "violation values should be non-negative" in err.message for err in errors
         )
 
 
@@ -163,9 +150,7 @@ class TestObjectiveVectorValidation:
 
     def test_non_finite_objective_value(self) -> None:
         issues: list[SchemaValidationError] = []
-        result = validate_objective_vector(
-            (float("inf"),), 1, issues=issues
-        )
+        result = validate_objective_vector((float("inf"),), 1, issues=issues)
         assert result is None
         assert any("must be finite" in err.message for err in issues)
 

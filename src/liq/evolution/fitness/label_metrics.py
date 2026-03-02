@@ -5,9 +5,6 @@ from __future__ import annotations
 import numpy as np
 
 from liq.evolution.errors import FitnessError
-from liq.gp.program.ast import Program
-from liq.gp.program.eval import evaluate
-from liq.gp.types import FitnessResult
 from liq.evolution.fitness.evaluation_schema import (
     BEHAVIOR_DESCRIPTOR_TURNOVER,
     METADATA_KEY_BEHAVIOR_DESCRIPTORS,
@@ -16,6 +13,9 @@ from liq.evolution.fitness.evaluation_schema import (
     METADATA_KEY_RAW_OBJECTIVES,
     METADATA_KEY_SLICE_SCORES,
 )
+from liq.gp.program.ast import Program
+from liq.gp.program.eval import evaluate
+from liq.gp.types import FitnessResult
 
 
 class LabelFitnessEvaluator:

@@ -64,7 +64,9 @@ class TestConstructorValidation:
     """Cover constructor ValueError paths."""
 
     def test_empty_behavior_descriptors_raises(self) -> None:
-        with pytest.raises(ValueError, match="behavior_descriptor_names must be non-empty"):
+        with pytest.raises(
+            ValueError, match="behavior_descriptor_names must be non-empty"
+        ):
             StrategyEvaluator(
                 backtest_runner=_simple_runner,
                 splits=_single_split(),
@@ -223,7 +225,9 @@ class TestFlatPayload:
         # Train and validate should both have the same metric
         metadata = results[0].metadata
         assert metadata["per_split_metrics"]["time_window:split_0:train"]["cagr"] == 0.3
-        assert metadata["per_split_metrics"]["time_window:split_0:validate"]["cagr"] == 0.3
+        assert (
+            metadata["per_split_metrics"]["time_window:split_0:validate"]["cagr"] == 0.3
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -315,11 +319,15 @@ class TestSanitizeObjective:
         assert result == 1e6
 
     def test_positive_inf_penalized(self) -> None:
-        result = _sanitize_objective(float("inf"), direction="maximize", nan_penalty=1e6)
+        result = _sanitize_objective(
+            float("inf"), direction="maximize", nan_penalty=1e6
+        )
         assert result == -1e6
 
     def test_negative_inf_penalized(self) -> None:
-        result = _sanitize_objective(float("-inf"), direction="minimize", nan_penalty=1e6)
+        result = _sanitize_objective(
+            float("-inf"), direction="minimize", nan_penalty=1e6
+        )
         assert result == 1e6
 
     def test_finite_value_returned_as_is(self) -> None:

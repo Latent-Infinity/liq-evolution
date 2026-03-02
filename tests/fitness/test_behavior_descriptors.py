@@ -6,21 +6,26 @@ import pytest
 
 from liq.evolution.fitness.behavior_descriptors import (
     BEHAVIOR_DESCRIPTOR_BENCHMARK_CORRELATION,
+    BEHAVIOR_DESCRIPTOR_DRAWDOWN_PROFILE,
     BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY,
     BEHAVIOR_DESCRIPTOR_MAX_LEVERAGE,
     BEHAVIOR_DESCRIPTOR_NET_EXPOSURE,
-    BEHAVIOR_DESCRIPTOR_DRAWDOWN_PROFILE,
-    BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
-    BEHAVIOR_DESCRIPTOR_TAIL_RISK,
     BEHAVIOR_DESCRIPTOR_STABILITY,
+    BEHAVIOR_DESCRIPTOR_TAIL_RISK,
+    BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
     BEHAVIOR_DESCRIPTOR_TURNOVER,
+    _benchmark_correlation,
+    _clamp,
     _correlation,
+    _drawdown_profile,
+    _holding_period_proxy,
     _max_drawdown,
     _max_leverage,
+    _net_exposure,
     _normalize,
     _safe_returns,
-    _net_exposure,
-    _holding_period_proxy,
+    _stability,
+    _tail_risk,
     _to_float_list,
     _trade_frequency,
     extract_behavior_descriptors,
@@ -171,6 +176,17 @@ class TestBehaviorDescriptorHelpers:
             -2.0,
         ]
 
+    def test_to_float_list_empty_and_non_iterable_inputs(self) -> None:
+        assert _to_float_list(None) == []
+        assert _to_float_list(b"abc") == []
+
+    def test_to_float_list_accepts_nested_mapping_payload(self) -> None:
+        assert _to_float_list({"values": [1, "2.0", -3, float("inf")]}) == [
+            1.0,
+            2.0,
+            -3.0,
+        ]
+
     def test_safe_returns_preserves_zero_divider_guard(self) -> None:
         assert _safe_returns([0.0, 2.0, 1.0]) == [0.0, -0.5]
 
@@ -192,6 +208,22 @@ class TestBehaviorDescriptorHelpers:
         assert _net_exposure([0.0, 0.0]) == 0.0
         assert _max_leverage([1.0, -2.0, 3.0], ()) == 2.0
 
+    def test_clamp_emits_warning_when_adjusting(self) -> None:
+        assert _clamp(2.0, 0.0, 1.0) == 1.0
+
     def test_normalize_behavior_descriptor_value_rejects_unknown_key(self) -> None:
         with pytest.raises(ValueError, match="unsupported behavior descriptor"):
             normalize_behavior_descriptor_value("bad_key", 0.5)
+
+    def test_max_drawdown_caps_to_unit_interval(self) -> None:
+        assert _max_drawdown([1.0, -2.0]) == 1.0
+
+    def test_benchmark_correlation_returns_zero_without_benchmark(self) -> None:
+        assert _benchmark_correlation([1.0, 2.0], [1.0, 2.0], []) == 0.0
+
+    def test_tail_risk_and_stability_default_to_zero(self) -> None:
+        assert _tail_risk([]) == 0.0
+        assert _stability([]) == 0.0
+
+    def test_drawdown_profile_short_equity_defaults_to_zero(self) -> None:
+        assert _drawdown_profile([10.0]) == 0.0

@@ -145,8 +145,8 @@ class TestPublicAPIReexports:
             ParallelConfig,
             PrimitiveConfig,
             SerializationConfig,
-            WarmStartConfig,
             StrategyEvaluator,
+            WarmStartConfig,
         )
 
         assert EvolutionConfig is not None
@@ -230,8 +230,7 @@ class TestPublicAPIReexports:
         assert StrategySeedTemplate is not None
 
     def test_qd_exports(self) -> None:
-        from liq.evolution import QDEvolutionResult, run_qd_evolution
-        from liq.evolution import qd
+        from liq.evolution import QDEvolutionResult, qd, run_qd_evolution
 
         assert callable(run_qd_evolution)
         assert QDEvolutionResult is not None

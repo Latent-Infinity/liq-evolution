@@ -46,10 +46,7 @@ class TwoStageFitnessEvaluator:
         self._stage_a = stage_a
         self._stage_b = stage_b
         self._top_k = top_k
-        if stage_b is None:
-            levels = [stage_a]
-        else:
-            levels = [stage_a, stage_b]
+        levels = [stage_a] if stage_b is None else [stage_a, stage_b]
         self._pipeline = MultiFidelityFitnessEvaluator(
             levels=levels,
             top_k_per_level=top_k,

@@ -51,7 +51,9 @@ class TestConstraintPolicy:
 
     def test_policy_evaluates_multiple_checks_and_keeps_max_penalty(self) -> None:
         program = _program()
-        policy = ConstraintPolicy(checks=(constraint_no_future_reference, constraint_max_leverage))
+        policy = ConstraintPolicy(
+            checks=(constraint_no_future_reference, constraint_max_leverage)
+        )
 
         violations = policy.evaluate(
             program,
@@ -71,8 +73,12 @@ class TestConstraintPolicy:
 class TestConstraintPropertyCases:
     """Property-style checks for constraint edge behavior."""
 
-    @given(st.floats(min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False))
-    def test_future_reference_marker_penalty_is_positive_when_marked(self, value: float) -> None:
+    @given(
+        st.floats(min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False)
+    )
+    def test_future_reference_marker_penalty_is_positive_when_marked(
+        self, value: float
+    ) -> None:
         program = _program()
         payload = {"future_reference_detected": value}
         violations = constraint_no_future_reference(program, payload)
@@ -83,8 +89,18 @@ class TestConstraintPropertyCases:
         else:
             assert violations is None
 
-    @given(st.lists(st.floats(min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False), min_size=1, max_size=20))
-    def test_no_negative_cash_is_max_negative_abs_value(self, cash_trace: list[float]) -> None:
+    @given(
+        st.lists(
+            st.floats(
+                min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False
+            ),
+            min_size=1,
+            max_size=20,
+        )
+    )
+    def test_no_negative_cash_is_max_negative_abs_value(
+        self, cash_trace: list[float]
+    ) -> None:
         program = _program()
         payload = {"traces": {"cash_trace": cash_trace}}
 
@@ -97,17 +113,23 @@ class TestConstraintPropertyCases:
 
     @given(
         st.lists(
-            st.floats(min_value=0.1, max_value=10.0, allow_nan=False, allow_infinity=False),
+            st.floats(
+                min_value=0.1, max_value=10.0, allow_nan=False, allow_infinity=False
+            ),
             min_size=1,
             max_size=20,
         ),
         st.lists(
-            st.floats(min_value=0.1, max_value=10.0, allow_nan=False, allow_infinity=False),
+            st.floats(
+                min_value=0.1, max_value=10.0, allow_nan=False, allow_infinity=False
+            ),
             min_size=1,
             max_size=20,
         ),
     )
-    def test_max_leverage_matches_trace_ratio(self, positions: list[float], equities: list[float]) -> None:
+    def test_max_leverage_matches_trace_ratio(
+        self, positions: list[float], equities: list[float]
+    ) -> None:
         program = _program()
         payload = {
             "traces": {

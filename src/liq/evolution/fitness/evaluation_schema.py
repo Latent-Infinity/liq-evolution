@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
-
+from typing import Any, Literal
 
 ObjectiveDirection = Literal["maximize", "minimize"]
 
@@ -423,10 +423,7 @@ def to_loss_form(
         penalty = abs(float(nan_penalty))
         loss = penalty
     else:
-        if direction == "maximize":
-            loss = -raw
-        else:
-            loss = raw
+        loss = -raw if direction == "maximize" else raw
     limit = abs(float(max_finite))
     if loss > limit:
         return limit

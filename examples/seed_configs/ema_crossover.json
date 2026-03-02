@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "version": "introductory",
+    "description": "Simple crossover-based seeds"
+  },
+  "seeds": [
+    {
+      "name": "ema_crossover_default",
+      "strategy": "ema_crossover",
+      "params": {
+        "fast_period": 12,
+        "slow_period": 26
+      }
+    }
+  ]
+}
+

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "liq-evolution"
-version = "0.1.3"
+version = "0.2.0"
 description = "Trading strategy evolution layer for the LIQ Stack"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ dependencies = [
     "liq-sim>=0.1.1",
     "liq-signals>=0.1.1",
     "liq-ta>=0.1.1",
-    "numpy>=1.26",
+    "numpy>=2.0",
     "polars>=0.20",
     "pydantic>=2.0",
     "rich>=13.0",
@@ -43,6 +43,7 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.0",
     "ruff>=0.14",
+    "pyyaml>=6.0",
     "ty>=0.0.1",
 ]
 
@@ -56,6 +57,7 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.0",
     "ruff>=0.14",
+    "pyyaml>=6.0",
     "ty>=0.0.1",
 ]
 

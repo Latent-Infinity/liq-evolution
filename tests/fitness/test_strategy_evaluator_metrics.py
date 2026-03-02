@@ -21,32 +21,44 @@ def test_resolve_metric_prefers_symbolic_aliases() -> None:
         "sharpe": 0.5,
     }
 
-    assert _resolve_metric(
-        objective_name="cagr",
-        metrics=metrics,
-        derived=derived,
-    ) == 0.12
-    assert _resolve_metric(
-        objective_name="max_drawdown",
-        metrics=metrics,
-        derived=derived,
-    ) == 0.41
-    assert _resolve_metric(
-        objective_name="sharpe",
-        metrics=metrics,
-        derived=derived,
-    ) == 1.0
+    assert (
+        _resolve_metric(
+            objective_name="cagr",
+            metrics=metrics,
+            derived=derived,
+        )
+        == 0.12
+    )
+    assert (
+        _resolve_metric(
+            objective_name="max_drawdown",
+            metrics=metrics,
+            derived=derived,
+        )
+        == 0.41
+    )
+    assert (
+        _resolve_metric(
+            objective_name="sharpe",
+            metrics=metrics,
+            derived=derived,
+        )
+        == 1.0
+    )
 
 
 def test_resolve_metric_falls_back_to_derived_scores() -> None:
     metrics: dict[str, float] = {}
     derived = {"capacity_proxy": 0.15}
 
-    assert _resolve_metric(
-        objective_name="capacity_proxy",
-        metrics=metrics,
-        derived=derived,
-    ) == 0.15
+    assert (
+        _resolve_metric(
+            objective_name="capacity_proxy",
+            metrics=metrics,
+            derived=derived,
+        )
+        == 0.15
+    )
 
 
 def test_turnover_objective_uses_position_churn_metric() -> None:

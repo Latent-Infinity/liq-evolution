@@ -8,6 +8,7 @@ import pytest
 liq_ta = pytest.importorskip("liq_ta")
 
 from liq.evolution.primitives.indicators_liq_ta import (  # noqa: E402
+    _PARAM_RANGES,
     LiqTAIndicatorBackend,
     _coerce_output,
     _make_multi_output_callable,
@@ -496,3 +497,235 @@ class TestComputeEdgeCases:
         assert result is buf
         # At least some values should be non-zero
         assert not np.all(buf == 0.0)
+
+
+class TestAllIndicatorsRegistered:
+    """Verify every indicator in liq_ta.INDICATORS produces ta_* primitives."""
+
+    def test_all_liq_ta_indicators_registered(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        """Every indicator in liq_ta.INDICATORS must produce at least one ta_* primitive."""
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        registered_names = {p.name for p in reg.list_primitives(category="indicator")}
+
+        missing = []
+        for name, meta in liq_ta.INDICATORS.items():
+            outputs = meta["outputs"]
+            if len(outputs) == 1:
+                expected = f"ta_{name}"
+                if expected not in registered_names:
+                    missing.append(expected)
+            else:
+                for out_name in outputs:
+                    expected = f"ta_{name}_{out_name}"
+                    if expected not in registered_names:
+                        missing.append(expected)
+
+        assert missing == [], f"Missing primitives: {missing}"
+
+    def test_rust_only_indicators_now_visible(self) -> None:
+        """Indicators from the Rust registry should now be in liq_ta.INDICATORS."""
+        rust_only = [
+            "ao",
+            "bears_power",
+            "bulls_power",
+            "connors_rsi",
+            "demarker",
+            "dpo",
+            "dss_bressert",
+            "laguerre_rsi",
+            "osma",
+            "rvi",
+            "stc",
+            "gaussian_filter",
+            "hma",
+            "supertrend",
+            "vortex",
+            "autocorr",
+            "chop",
+            "gaussian_channel",
+            "hma_atr_bands",
+            "hma_bollinger_bands",
+            "hurst",
+            "vwap_atr_bands",
+            "vwap_bollinger_bands",
+            "ulcer_index",
+        ]
+        for name in rust_only:
+            assert name in liq_ta.INDICATORS, f"{name} not in INDICATORS"
+
+
+class TestNewlyAddedIndicators:
+    """Spot-check newly visible indicators for correct arity, output type, params."""
+
+    def test_hma_registered(self, backend: LiqTAIndicatorBackend) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        hma = reg.get("ta_hma")
+        assert hma.output_type == Series
+        assert hma.arity == 1  # single input: data
+        assert len(hma.param_specs) == 1
+        assert hma.param_specs[0].name == "period"
+
+    def test_supertrend_multi_output(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        st = reg.get("ta_supertrend_supertrend")
+        assert st.output_type == Series
+        assert st.arity == 3  # high, low, close
+        # Check multiplier param is present
+        param_names = [p.name for p in st.param_specs]
+        assert "period" in param_names
+        assert "multiplier" in param_names
+
+    def test_vortex_multi_output(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        plus_vi = reg.get("ta_vortex_plus_vi")
+        minus_vi = reg.get("ta_vortex_minus_vi")
+        assert plus_vi.output_type == Series
+        assert minus_vi.output_type == Series
+        assert plus_vi.arity == 3
+
+    def test_connors_rsi_params(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        crsi = reg.get("ta_connors_rsi")
+        param_names = [p.name for p in crsi.param_specs]
+        assert "rsi_period" in param_names
+        assert "streak_period" in param_names
+        assert "rank_period" in param_names
+
+    def test_laguerre_rsi_gamma_param(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        lrsi = reg.get("ta_laguerre_rsi")
+        param_names = [p.name for p in lrsi.param_specs]
+        assert "gamma" in param_names
+        gamma_spec = next(p for p in lrsi.param_specs if p.name == "gamma")
+        assert gamma_spec.dtype is float
+        assert gamma_spec.min_value == 0.01
+        assert gamma_spec.max_value == 0.99
+
+
+class TestParamRangesCoverage:
+    """Verify no indicator params are silently dropped."""
+
+    def test_param_ranges_cover_all_params(self) -> None:
+        """Every param in every indicator's metadata must have a _PARAM_RANGES entry."""
+        missing = []
+        for name, meta in liq_ta.INDICATORS.items():
+            for param in meta["params"]:
+                if param not in _PARAM_RANGES:
+                    missing.append(f"{name}.{param}")
+        assert missing == [], f"Params missing from _PARAM_RANGES: {missing}"
+
+    def test_existing_indicator_params_not_dropped(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        """Ichimoku, keltner_channel, qqe should have all params registered."""
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+
+        # Ichimoku has 4 params and 5 outputs
+        tenkan = reg.get("ta_ichimoku_tenkan")
+        ichimoku_params = [p.name for p in tenkan.param_specs]
+        assert "tenkan_period" in ichimoku_params
+        assert "kijun_period" in ichimoku_params
+        assert "senkou_b_period" in ichimoku_params
+        assert "displacement" in ichimoku_params
+
+        # Keltner channel has 2 params
+        kc_upper = reg.get("ta_keltner_channel_upper")
+        kc_params = [p.name for p in kc_upper.param_specs]
+        assert "period" in kc_params
+        assert "atr_multiplier" in kc_params
+
+        # QQE has 4 params
+        qqe = reg.get("ta_qqe_qqe")
+        qqe_params = [p.name for p in qqe.param_specs]
+        assert "rsi_period" in qqe_params
+        assert "smoothing_period" in qqe_params
+        assert "wilders_period" in qqe_params
+        assert "factor" in qqe_params
+
+
+class TestNewIndicatorGoldenValues:
+    """Spot-check computation of new indicators through the cached backend."""
+
+    def test_hma_golden_value(
+        self,
+        backend: LiqTAIndicatorBackend,
+        sample_data: dict,
+    ) -> None:
+        """HMA should produce finite values for sufficient data."""
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        hma = reg.get("ta_hma")
+        result = hma.callable(sample_data["data"], period=9)
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float64
+        assert len(result) == 100
+        # At least some non-NaN values in the tail
+        valid = result[~np.isnan(result)]
+        assert len(valid) > 50
+
+    def test_connors_rsi_bounded(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        """ConnorsRSI values should be bounded [0, 100]."""
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        crsi = reg.get("ta_connors_rsi")
+        # ConnorsRSI with rank_period=50 requires >= 51 data points
+        rng = np.random.default_rng(42)
+        data = 100.0 + np.cumsum(rng.standard_normal(200))
+        result = crsi.callable(
+            data,
+            rsi_period=14,
+            streak_period=2,
+            rank_period=50,
+        )
+        assert isinstance(result, np.ndarray)
+        valid = result[~np.isnan(result)]
+        assert len(valid) > 0
+        assert np.all(valid >= 0.0)
+        assert np.all(valid <= 100.0)
+
+    def test_supertrend_computes(
+        self,
+        backend: LiqTAIndicatorBackend,
+        sample_data: dict,
+    ) -> None:
+        """Supertrend should produce finite values."""
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+        st = reg.get("ta_supertrend_supertrend")
+        result = st.callable(
+            sample_data["high"],
+            sample_data["low"],
+            sample_data["close"],
+            period=10,
+            multiplier=3.0,
+        )
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float64
+        valid = result[~np.isnan(result)]
+        assert len(valid) > 0

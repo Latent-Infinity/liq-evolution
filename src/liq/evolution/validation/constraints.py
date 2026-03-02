@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Callable
-
 import math
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from liq.gp.program.ast import Program
 
@@ -187,4 +186,3 @@ class ConstraintPolicy:
                 violations[key] = max(violations.get(key, 0.0), penalty)
 
         return violations
-

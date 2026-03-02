@@ -10,9 +10,6 @@ import polars as pl
 
 from liq.evolution.adapters.signal_output import GPSignalOutput
 from liq.evolution.errors import FitnessEvaluationError
-from liq.gp.program.ast import Program
-from liq.gp.program.eval import evaluate as gp_evaluate
-from liq.gp.types import FitnessResult
 from liq.evolution.fitness.evaluation_schema import (
     METADATA_KEY_BEHAVIOR_DESCRIPTORS,
     METADATA_KEY_CONSTRAINT_VIOLATIONS,
@@ -20,6 +17,9 @@ from liq.evolution.fitness.evaluation_schema import (
     METADATA_KEY_RAW_OBJECTIVES,
     METADATA_KEY_SLICE_SCORES,
 )
+from liq.gp.program.ast import Program
+from liq.gp.program.eval import evaluate as gp_evaluate
+from liq.gp.types import FitnessResult
 
 
 class _ProgramStrategy:
@@ -79,8 +79,7 @@ class BacktestFitnessEvaluator:
     ) -> dict[str, Any]:
         """Build metadata payload matching phase-0 contract."""
         fold_metrics = {
-            f"fold:{idx}": {"metric": value}
-            for idx, value in enumerate(fold_values)
+            f"fold:{idx}": {"metric": value} for idx, value in enumerate(fold_values)
         }
         metadata: dict[str, Any] = {
             "metric": self._metric,

@@ -1,0 +1,14 @@
+schema_version: 1
+metadata:
+  version: "introductory"
+  description: "Regime-based seed"
+seeds:
+  - name: regime_switch
+    strategy: regime_switching_trend_mean_reversion
+    params:
+      fast_ma_period: 12
+      slow_ma_period: 26
+      adx_period: 14
+      adx_threshold: 25.0
+      range_threshold: 20.0
+

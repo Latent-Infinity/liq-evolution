@@ -34,8 +34,8 @@ from liq.evolution.errors import (
     SerializationError,
 )
 from liq.evolution.evolution.engine import evolve
-from liq.evolution.fitness.label_metrics import LabelFitnessEvaluator
 from liq.evolution.fitness.eval_cache import FitnessEvaluationCache  # noqa: F401
+from liq.evolution.fitness.label_metrics import LabelFitnessEvaluator
 from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
 from liq.evolution.fitness.objectives import wire_objectives
 from liq.evolution.fitness.runner_backtest import BacktestFitnessEvaluator
@@ -44,7 +44,6 @@ from liq.evolution.fitness.two_stage import TwoStageFitnessEvaluator
 from liq.evolution.primitives.feature_context import FeatureContext
 from liq.evolution.primitives.registry import build_trading_registry
 from liq.evolution.primitives.series_sources import prepare_evaluation_context
-from liq.evolution.qd import QDEvolutionResult, run_qd_evolution
 from liq.evolution.program import (
     ConstantNode,
     EvaluationContext,
@@ -64,12 +63,20 @@ from liq.evolution.protocols import (
     PrimitiveRegistry,
     StoreBackend,
 )
+from liq.evolution.qd import QDEvolutionResult, run_qd_evolution
 from liq.evolution.seeds import (
+    SeedManifest,
+    SeedSpec,
     StrategySeedTemplate,
+    build_seed_from_spec,
+    build_seed_programs,
+    build_seed_programs_from_path,
     build_strategy_seed,
     build_strategy_seeds,
     get_seed_template,
     list_known_strategy_seeds,
+    load_seed_manifest,
+    load_seed_specs,
 )
 from liq.gp.config import SeedInjectionConfig
 
@@ -108,6 +115,13 @@ __all__ = [
     "SeedInjectionConfig",
     "build_strategy_seed",
     "build_strategy_seeds",
+    "build_seed_from_spec",
+    "build_seed_programs",
+    "build_seed_programs_from_path",
+    "load_seed_manifest",
+    "load_seed_specs",
+    "SeedManifest",
+    "SeedSpec",
     "get_seed_template",
     "list_known_strategy_seeds",
     "StrategySeedTemplate",

@@ -18,9 +18,9 @@ from liq.evolution.fitness.evaluation_schema import (
     to_loss_form,
 )
 from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
-from liq.evolution.qd.orchestrator import run_qd_evolution
 from liq.evolution.primitives import prepare_evaluation_context
 from liq.evolution.primitives.registry import build_trading_registry
+from liq.evolution.qd.orchestrator import run_qd_evolution
 from liq.gp.config import GPConfig as LiqGPConfig
 from liq.gp.evolution.qd_archive import QDArchive
 from liq.gp.program.ast import TerminalNode
@@ -30,9 +30,24 @@ from liq.gp.types import FitnessResult
 
 def _make_splits() -> list[WalkForwardSplit]:
     return [
-        WalkForwardSplit(train=slice(0, 8), validate=slice(8, 12), test=slice(12, 16), slice_id="time_window:split_0"),
-        WalkForwardSplit(train=slice(16, 24), validate=slice(24, 28), test=slice(28, 32), slice_id="time_window:split_1"),
-        WalkForwardSplit(train=slice(32, 40), validate=slice(40, 44), test=slice(44, 48), slice_id="time_window:split_2"),
+        WalkForwardSplit(
+            train=slice(0, 8),
+            validate=slice(8, 12),
+            test=slice(12, 16),
+            slice_id="time_window:split_0",
+        ),
+        WalkForwardSplit(
+            train=slice(16, 24),
+            validate=slice(24, 28),
+            test=slice(28, 32),
+            slice_id="time_window:split_1",
+        ),
+        WalkForwardSplit(
+            train=slice(32, 40),
+            validate=slice(40, 44),
+            test=slice(44, 48),
+            slice_id="time_window:split_2",
+        ),
     ]
 
 
@@ -91,14 +106,23 @@ class _SplitAwareLevelEvaluator:
                 raw_dd = 0.9 / (offset + 1 + base_score)
 
                 split_scores[f"{split_key}:cagr"] = to_loss_form(raw_cagr, "maximize")
-                split_scores[f"{split_key}:max_drawdown"] = to_loss_form(raw_dd, "minimize")
+                split_scores[f"{split_key}:max_drawdown"] = to_loss_form(
+                    raw_dd, "minimize"
+                )
                 split_scores[f"{split_key}:constraint:stability"] = 0.05 * (offset + 1)
-                split_metrics[split.slice_id] = {"cagr": raw_cagr, "max_drawdown": raw_dd}
+                split_metrics[split.slice_id] = {
+                    "cagr": raw_cagr,
+                    "max_drawdown": raw_dd,
+                }
 
                 if self._inject_adversarial and offset == 0:
                     violation = 0.25
-                    split_scores[f"{split_key}:constraint:adversarial:high_spread"] = violation
-                    constraint_violations[f"{split_key}:adversarial:high_spread"] = violation
+                    split_scores[f"{split_key}:constraint:adversarial:high_spread"] = (
+                        violation
+                    )
+                    constraint_violations[f"{split_key}:adversarial:high_spread"] = (
+                        violation
+                    )
 
             raw_objectives = tuple(split_scores.values())
             raw_objective = sum(
@@ -115,11 +139,15 @@ class _SplitAwareLevelEvaluator:
                 METADATA_KEY_PER_SPLIT_METRICS: split_metrics,
                 METADATA_KEY_RAW_OBJECTIVES: raw_objectives,
                 METADATA_KEY_SLICE_SCORES: split_scores,
-                METADATA_KEY_BEHAVIOR_DESCRIPTORS: {BEHAVIOR_DESCRIPTOR_TURNOVER: min(1.0, base_score / 2.0)},
+                METADATA_KEY_BEHAVIOR_DESCRIPTORS: {
+                    BEHAVIOR_DESCRIPTOR_TURNOVER: min(1.0, base_score / 2.0)
+                },
                 METADATA_KEY_CONSTRAINT_VIOLATIONS: constraint_violations,
             }
             self.last_metadata.append(metadata)
-            results.append(FitnessResult(objectives=(raw_objective,), metadata=metadata))
+            results.append(
+                FitnessResult(objectives=(raw_objective,), metadata=metadata)
+            )
 
         return results
 
@@ -142,7 +170,7 @@ def _make_lexicase_config(seed: int) -> LiqGPConfig:
 
 
 def _run_qd(*, seed: int, coverage_weight: float, evaluator) -> tuple:
-    splits = _make_splits()
+    _make_splits()
     registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
     config = _make_lexicase_config(seed=seed)
     context = _make_context()
@@ -165,7 +193,9 @@ def _run_qd(*, seed: int, coverage_weight: float, evaluator) -> tuple:
 def test_end_to_end_lexicase_qd_multifidelity_pipeline() -> None:
     splits = _make_splits()
 
-    def _build_mf(scale: float, *, adversarial: bool = False) -> MultiFidelityFitnessEvaluator:
+    def _build_mf(
+        scale: float, *, adversarial: bool = False
+    ) -> MultiFidelityFitnessEvaluator:
         level0 = _SplitAwareLevelEvaluator(
             splits=splits,
             scale=scale,
@@ -194,7 +224,10 @@ def test_end_to_end_lexicase_qd_multifidelity_pipeline() -> None:
         str(program) for program in mf_result_repeat.portfolio
     ]
     assert mf_result.coverage_report["filled_bins"] >= 1
-    assert mf_result.coverage_report["filled_bins"] <= mf_result.coverage_report["total_bins"]
+    assert (
+        mf_result.coverage_report["filled_bins"]
+        <= mf_result.coverage_report["total_bins"]
+    )
     assert 0.0 <= mf_result.coverage_report["fill_ratio"] <= 1.0
     assert set(mf_result.coverage_report.keys()) == {
         "filled_bins",
@@ -217,18 +250,27 @@ def test_end_to_end_lexicase_qd_multifidelity_pipeline() -> None:
     flat_result = _run_qd(seed=123, coverage_weight=0.0, evaluator=flat_eval)
 
     # Coverage-pressure path should not decrease exploration.
-    assert mf_result.coverage_report["fill_ratio"] >= flat_result.coverage_report["fill_ratio"]
+    assert (
+        mf_result.coverage_report["fill_ratio"]
+        >= flat_result.coverage_report["fill_ratio"]
+    )
 
     # Multi-fidelity must evaluate fewer expensive programs than the flat strategy.
-    assert mf_result.coverage_report["filled_bins"] >= flat_result.coverage_report["filled_bins"]
-    assert mf_result.coverage_report["fill_ratio"] >= flat_result.coverage_report["fill_ratio"]
+    assert (
+        mf_result.coverage_report["filled_bins"]
+        >= flat_result.coverage_report["filled_bins"]
+    )
+    assert (
+        mf_result.coverage_report["fill_ratio"]
+        >= flat_result.coverage_report["fill_ratio"]
+    )
     assert level1.total_program_evals < flat_eval.total_program_evals
 
     # Constraint/lexicase case injection is present in level-0 and therefore selectable.
     keys = {
         key
         for metadata in level0.last_metadata
-        for key in metadata[METADATA_KEY_SLICE_SCORES].keys()
+        for key in metadata[METADATA_KEY_SLICE_SCORES]
     }
     assert any("adversarial" in key for key in keys)
     assert any("constraint" in key for key in keys)
@@ -268,5 +310,5 @@ def test_coverage_pressure_prefers_underfilled_bins() -> None:
     random_samples = archive.sample(6, rng_random, coverage_weight=0.0)
     coverage_samples = archive.sample(6, rng_coverage, coverage_weight=1.0)
 
-    assert set(p.name for p in random_samples) == {"top_a", "top_b"}  # type: ignore[attr-defined]
-    assert set(p.name for p in coverage_samples) == {"under"}  # type: ignore[attr-defined]
+    assert {p.name for p in random_samples} == {"top_a", "top_b"}  # type: ignore[attr-defined]
+    assert {p.name for p in coverage_samples} == {"under"}  # type: ignore[attr-defined]

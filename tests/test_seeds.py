@@ -313,6 +313,118 @@ def _seed_registry() -> PrimitiveRegistry:
         arity=4,
     )
     registry.register(
+        "ta_cdl_morning_star",
+        _passthrough,
+        category="ta",
+        input_types=(Series, Series, Series, Series),
+        output_type=BoolSeries,
+        arity=4,
+    )
+    registry.register(
+        "ta_cdl_evening_star",
+        _passthrough,
+        category="ta",
+        input_types=(Series, Series, Series, Series),
+        output_type=BoolSeries,
+        arity=4,
+    )
+    registry.register(
+        "ta_wma",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_dema",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_tema",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_kama",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_t3",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_ema_wilder",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_ppo",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_linearreg_slope",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_adxr",
+        _passthrough,
+        category="ta",
+        input_types=(Series, Series, Series),
+        output_type=Series,
+        arity=3,
+    )
+    registry.register(
+        "ta_bop",
+        _passthrough,
+        category="ta",
+        input_types=(Series, Series, Series, Series),
+        output_type=Series,
+        arity=4,
+    )
+    registry.register(
+        "ta_rolling_stddev",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
+        "ta_var",
+        _passthrough,
+        category="ta",
+        input_types=(Series,),
+        output_type=Series,
+        arity=1,
+    )
+    registry.register(
         "crosses_above",
         lambda a, b: a,
         category="crossover",
@@ -345,6 +457,20 @@ def _seed_registry() -> PrimitiveRegistry:
         lambda a, b: a,
         category="logic",
         input_types=(BoolSeries, BoolSeries),
+        output_type=BoolSeries,
+    )
+    registry.register(
+        "or_op",
+        lambda a, b: a,
+        category="logic",
+        input_types=(BoolSeries, BoolSeries),
+        output_type=BoolSeries,
+    )
+    registry.register(
+        "not_op",
+        lambda a: a,
+        category="logic",
+        input_types=(BoolSeries,),
         output_type=BoolSeries,
     )
     registry.register(
@@ -400,6 +526,23 @@ class TestStrategySeedRegistry:
             "ad_ascending",
             "cdl_engulfing_bullish",
             "cdl_hammer",
+            "wma_crossover",
+            "dema_crossover",
+            "tema_bullish_cross",
+            "kama_trend",
+            "t3_bullish_cross",
+            "ema_wilder_bullish_cross",
+            "ppo_bullish_cross",
+            "ppo_bearish_cross",
+            "linearreg_slope_up",
+            "adxr_trend",
+            "bop_bullish",
+            "rolling_stddev_spike",
+            "var_spike",
+            "cdl_morning_star_bullish",
+            "cdl_evening_star_bearish",
+            "regime_switching_trend_mean_reversion",
+            "regime_switching_momentum_volatility",
         }
 
     def test_get_unknown_seed_raises_key_error(self) -> None:
@@ -477,6 +620,23 @@ class TestStrategySeedBuilders:
             "cdl_engulfing_bullish",
             "cdl_hammer",
             "adx_trend",
+            "wma_crossover",
+            "dema_crossover",
+            "tema_bullish_cross",
+            "kama_trend",
+            "t3_bullish_cross",
+            "ema_wilder_bullish_cross",
+            "ppo_bullish_cross",
+            "ppo_bearish_cross",
+            "linearreg_slope_up",
+            "adxr_trend",
+            "bop_bullish",
+            "rolling_stddev_spike",
+            "var_spike",
+            "cdl_morning_star_bullish",
+            "cdl_evening_star_bearish",
+            "regime_switching_trend_mean_reversion",
+            "regime_switching_momentum_volatility",
         ],
     )
     def test_build_strategy_seed_dispatch(self, seed_name: str) -> None:
@@ -489,12 +649,28 @@ class TestStrategySeedBuilders:
         ("seed_name", "invalid_kwargs", "match"),
         [
             ("ema_crossover", {"fast_period": 0}, "ema periods must be positive"),
-            ("ema_crossover", {"fast_period": 20, "slow_period": 20}, "fast_period must be smaller"),
+            (
+                "ema_crossover",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
             ("sma_crossover", {"slow_period": 0}, "sma periods must be positive"),
-            ("sma_crossover", {"fast_period": 20, "slow_period": 20}, "fast_period must be smaller"),
-            ("rsi_oversold", {"threshold": -1}, "rsi threshold must be between 0 and 100"),
+            (
+                "sma_crossover",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            (
+                "rsi_oversold",
+                {"threshold": -1},
+                "rsi threshold must be between 0 and 100",
+            ),
             ("rsi_oversold", {"period": 0}, "rsi period must be positive"),
-            ("rsi_overbought", {"threshold": 101}, "rsi threshold must be between 0 and 100"),
+            (
+                "rsi_overbought",
+                {"threshold": 101},
+                "rsi threshold must be between 0 and 100",
+            ),
             ("rsi_overbought", {"period": 0}, "rsi period must be positive"),
             (
                 "macd_bullish_cross",
@@ -517,7 +693,11 @@ class TestStrategySeedBuilders:
                 {"fast_period": 20, "slow_period": 20},
                 "fast_period must be smaller than slow_period",
             ),
-            ("macd_bearish_cross", {"fast_period": 0, "slow_period": 26}, "macd periods must be positive"),
+            (
+                "macd_bearish_cross",
+                {"fast_period": 0, "slow_period": 26},
+                "macd periods must be positive",
+            ),
             (
                 "ema_bearish_cross",
                 {"fast_period": 20, "slow_period": 20},
@@ -554,32 +734,52 @@ class TestStrategySeedBuilders:
                 {"rsi_period": 0},
                 "stochrsi periods must be positive",
             ),
-            ("aroon_momentum", {"up_threshold": -1}, "up_threshold must be between 0 and 100"),
+            (
+                "aroon_momentum",
+                {"up_threshold": -1},
+                "up_threshold must be between 0 and 100",
+            ),
             ("aroon_momentum", {"period": 0}, "aroon period must be positive"),
             (
                 "mama_bullish_cross",
                 {"fast_limit": 0},
                 "fast_limit must be between 0 and 1",
             ),
-            ("mama_bullish_cross", {"slow_limit": 0}, "slow_limit must be between 0 and 1"),
+            (
+                "mama_bullish_cross",
+                {"slow_limit": 0},
+                "slow_limit must be between 0 and 1",
+            ),
             (
                 "aroonosc_bullish_cross",
                 {"threshold": 101},
                 "threshold must be between -100 and 100",
             ),
-            ("aroonosc_bullish_cross", {"period": 0}, "aroonosc period must be positive"),
+            (
+                "aroonosc_bullish_cross",
+                {"period": 0},
+                "aroonosc period must be positive",
+            ),
             (
                 "williams_r_oversold",
                 {"threshold": 1},
                 "threshold must be between -100 and 0",
             ),
-            ("williams_r_oversold", {"period": 0}, "williams_r period must be positive"),
+            (
+                "williams_r_oversold",
+                {"period": 0},
+                "williams_r period must be positive",
+            ),
             (
                 "williams_r_overbought",
                 {"threshold": 1},
                 "threshold must be between -100 and 0",
             ),
-            ("williams_r_overbought", {"period": 0}, "williams_r period must be positive"),
+            (
+                "williams_r_overbought",
+                {"period": 0},
+                "williams_r period must be positive",
+            ),
             ("roc_bullish_cross", {"period": 0}, "roc period must be positive"),
             ("trix_bullish_cross", {"period": 0}, "trix period must be positive"),
             ("mom_bullish_cross", {"period": 0}, "momentum period must be positive"),
@@ -589,33 +789,171 @@ class TestStrategySeedBuilders:
                 "fast_period must be smaller than slow_period",
             ),
             ("apo_bullish_cross", {"fast_period": 0}, "apo periods must be positive"),
-            ("cmo_oversold", {"threshold": -200}, "threshold must be between -100 and 100"),
+            (
+                "cmo_oversold",
+                {"threshold": -200},
+                "threshold must be between -100 and 100",
+            ),
             ("cmo_oversold", {"period": 0}, "cmo period must be positive"),
-            ("cmo_overbought", {"threshold": 200}, "threshold must be between -100 and 100"),
+            (
+                "cmo_overbought",
+                {"threshold": 200},
+                "threshold must be between -100 and 100",
+            ),
             ("cmo_overbought", {"period": 0}, "cmo period must be positive"),
             ("sar_bullish", {"af_start": 1.1}, "af_start must be between 0 and 1"),
-            ("sar_bullish", {"af_step": 0.8, "af_max": 0.5}, "af_step must be smaller than or equal to af_max"),
+            (
+                "sar_bullish",
+                {"af_step": 0.8, "af_max": 0.5},
+                "af_step must be smaller than or equal to af_max",
+            ),
             ("sar_bullish", {"af_step": -0.2}, "af_step must be between 0 and 1"),
             ("sar_bullish", {"af_max": 1.1}, "af_max must be between 0 and 1"),
-            ("adx_trend", {"adx_threshold": 101.0}, "adx_threshold must be between 0 and 100"),
+            (
+                "adx_trend",
+                {"adx_threshold": 101.0},
+                "adx_threshold must be between 0 and 100",
+            ),
             ("adx_trend", {"period": 0}, "adx period must be positive"),
             ("vwap_support", {"op": "gte"}, "op must be 'gt' or 'lt'"),
-            ("cci_oversold", {"threshold": 5001}, "cci threshold must be in a realistic range"),
+            (
+                "cci_oversold",
+                {"threshold": 5001},
+                "cci threshold must be in a realistic range",
+            ),
             ("cci_oversold", {"period": 0}, "cci period must be positive"),
-            ("cci_overbought", {"threshold": -5001}, "cci threshold must be in a realistic range"),
+            (
+                "cci_overbought",
+                {"threshold": -5001},
+                "cci threshold must be in a realistic range",
+            ),
             ("cci_overbought", {"period": 0}, "cci period must be positive"),
             ("bollinger_oversold", {"std_dev": 0}, "std_dev must be greater than 0"),
             ("bollinger_oversold", {"period": 0}, "bollinger period must be positive"),
-            ("donchian_breakout", {"direction": "sideways"}, "direction must be 'up' or 'down'"),
+            (
+                "donchian_breakout",
+                {"direction": "sideways"},
+                "direction must be 'up' or 'down'",
+            ),
             ("donchian_breakout", {"period": 0}, "donchian period must be positive"),
             ("atr_volatility_spike", {"lookback": 0}, "lookback must be positive"),
             ("atr_volatility_spike", {"period": 0}, "atr period must be positive"),
-            ("mfi_oversold", {"threshold": -10}, "mfi threshold must be between 0 and 100"),
+            (
+                "mfi_oversold",
+                {"threshold": -10},
+                "mfi threshold must be between 0 and 100",
+            ),
             ("mfi_oversold", {"period": 0}, "mfi period must be positive"),
-            ("mfi_overbought", {"threshold": 120}, "mfi threshold must be between 0 and 100"),
+            (
+                "mfi_overbought",
+                {"threshold": 120},
+                "mfi threshold must be between 0 and 100",
+            ),
             ("mfi_overbought", {"period": 0}, "mfi period must be positive"),
             ("obv_uptrend", {"lookback": 0}, "lookback must be positive"),
             ("ad_ascending", {"lookback": 0}, "lookback must be positive"),
+            ("wma_crossover", {"fast_period": 0}, "wma periods must be positive"),
+            (
+                "wma_crossover",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("dema_crossover", {"fast_period": 0}, "dema periods must be positive"),
+            (
+                "dema_crossover",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("tema_bullish_cross", {"fast_period": 0}, "tema periods must be positive"),
+            (
+                "tema_bullish_cross",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("kama_trend", {"fast_period": 0}, "kama periods must be positive"),
+            (
+                "kama_trend",
+                {"adapt_fast_period": 0},
+                "kama adaptive periods must be positive",
+            ),
+            (
+                "kama_trend",
+                {"adapt_slow_period": 0},
+                "kama adaptive periods must be positive",
+            ),
+            (
+                "kama_trend",
+                {"adapt_fast_period": 30, "adapt_slow_period": 2},
+                "kama adaptive fast period must be smaller",
+            ),
+            (
+                "kama_trend",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("t3_bullish_cross", {"fast_period": 0}, "t3 periods must be positive"),
+            (
+                "t3_bullish_cross",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            (
+                "t3_bullish_cross",
+                {"vfactor": 0.0},
+                "vfactor must be between 0.1 and 10",
+            ),
+            (
+                "ema_wilder_bullish_cross",
+                {"fast_period": 0},
+                "ema_wilder periods must be positive",
+            ),
+            (
+                "ema_wilder_bullish_cross",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            (
+                "ppo_bullish_cross",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("ppo_bullish_cross", {"fast_period": 0}, "ppo periods must be positive"),
+            (
+                "ppo_bearish_cross",
+                {"fast_period": 20, "slow_period": 20},
+                "fast_period must be smaller",
+            ),
+            ("ppo_bearish_cross", {"slow_period": 0}, "ppo periods must be positive"),
+            ("linearreg_slope_up", {"period": 0}, "linearreg period must be positive"),
+            ("adxr_trend", {"period": 0}, "adxr period must be positive"),
+            (
+                "adxr_trend",
+                {"threshold": 110.0},
+                "adxr_threshold must be between 0 and 100",
+            ),
+            (
+                "rolling_stddev_spike",
+                {"period": 0},
+                "rolling_stddev period must be positive",
+            ),
+            ("rolling_stddev_spike", {"lookback": 0}, "lookback must be positive"),
+            ("var_spike", {"period": 0}, "var period must be positive"),
+            ("var_spike", {"lookback": 0}, "lookback must be positive"),
+            (
+                "regime_switching_trend_mean_reversion",
+                {"range_threshold": 101},
+                "threshold must be between 0 and 100",
+            ),
+            (
+                "regime_switching_trend_mean_reversion",
+                {"range_threshold": 30, "adx_threshold": 20},
+                "range_threshold must be <= adx_threshold",
+            ),
+            (
+                "regime_switching_momentum_volatility",
+                {"fast_std_period": 40, "slow_std_period": 20},
+                "fast_period must be smaller than slow_period",
+            ),
         ],
     )
     def test_builder_validation_branches(

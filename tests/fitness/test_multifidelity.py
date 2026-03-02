@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import numpy as np
 import pytest
 
 from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
@@ -29,14 +28,18 @@ class _ScoreByProgramEvaluator:
             raise ValueError("objectives_per_program must be >= 1")
         self._objectives_per_program = objectives_per_program
 
-    def evaluate(self, programs: Sequence[int], context: dict[str, object]) -> list[FitnessResult]:
+    def evaluate(
+        self, programs: Sequence[int], context: dict[str, object]
+    ) -> list[FitnessResult]:
         del context
         self.calls.append(tuple(programs))
         results: list[FitnessResult] = []
         for program in programs:
             base_offset = program % len(self._scores)
             score = float(self._scores[base_offset])
-            objectives = (score,) if self._objectives_per_program == 1 else (score, score / 2)
+            objectives = (
+                (score,) if self._objectives_per_program == 1 else (score, score / 2)
+            )
             metadata = {
                 "archive_bin": "default_bin",
                 "raw_objectives": objectives,
@@ -172,7 +175,9 @@ class TestMultiFidelityEvaluation:
         )
 
         evaluator.evaluate([0, 1, 2], {})
-        assert level1.calls == [(2, 1)]  # finite objectives sorted before NaN-missing case
+        assert level1.calls == [
+            (2, 1)
+        ]  # finite objectives sorted before NaN-missing case
 
     def test_nan_objectives_are_demoted_in_pareto(self) -> None:
         class _ParetoNaNEvaluator:
@@ -228,7 +233,9 @@ class TestMultiFidelityEvaluation:
                 return [
                     FitnessResult(
                         objectives=score_map[int(program)],
-                        metadata={"archive_bin": "bin_a" if int(program) % 2 == 0 else "bin_b"},
+                        metadata={
+                            "archive_bin": "bin_a" if int(program) % 2 == 0 else "bin_b"
+                        },
                     )
                     for program in programs
                 ]
@@ -330,7 +337,9 @@ class TestMultiFidelityEvaluation:
                 return [
                     FitnessResult(
                         objectives=(score,),
-                        metadata={"archive_bin": "bin_a" if int(program) % 2 else "bin_b"},
+                        metadata={
+                            "archive_bin": "bin_a" if int(program) % 2 else "bin_b"
+                        },
                     )
                     for program, score in zip(
                         programs,
@@ -365,13 +374,18 @@ class TestMultiFidelityEvaluation:
 
         with pytest.raises(ValueError, match="level_costs must be non-decreasing"):
             MultiFidelityFitnessEvaluator(
-                levels=(_ScoreByProgramEvaluator([1.0]), _ScoreByProgramEvaluator([2.0])),
+                levels=(
+                    _ScoreByProgramEvaluator([1.0]),
+                    _ScoreByProgramEvaluator([2.0]),
+                ),
                 top_k_per_level=1,
                 level_costs=(2.0, 1.0),
             )
 
     def test_invalid_initialization(self) -> None:
-        with pytest.raises(ValueError, match="levels must contain at least one evaluator"):
+        with pytest.raises(
+            ValueError, match="levels must contain at least one evaluator"
+        ):
             MultiFidelityFitnessEvaluator(levels=())
 
         with pytest.raises(ValueError, match="promotion_strategy must be one of"):
@@ -386,7 +400,9 @@ class TestMultiFidelityEvaluation:
                 objective_directions=(),
             )
 
-        with pytest.raises(ValueError, match="objective_directions must be 'maximize' or 'minimize'"):
+        with pytest.raises(
+            ValueError, match="objective_directions must be 'maximize' or 'minimize'"
+        ):
             MultiFidelityFitnessEvaluator(
                 levels=(_ScoreByProgramEvaluator([1.0]),),
                 objective_directions=("invalid",),  # type: ignore[arg-type]
@@ -400,13 +416,19 @@ class TestMultiFidelityEvaluation:
 
         with pytest.raises(ValueError, match="top_k_per_level values must be > 0"):
             MultiFidelityFitnessEvaluator(
-                levels=(_ScoreByProgramEvaluator([1.0]), _ScoreByProgramEvaluator([2.0])),
+                levels=(
+                    _ScoreByProgramEvaluator([1.0]),
+                    _ScoreByProgramEvaluator([2.0]),
+                ),
                 top_k_per_level=0,
             )
 
         with pytest.raises(ValueError, match="top_k_per_level fractions must be in"):
             MultiFidelityFitnessEvaluator(
-                levels=(_ScoreByProgramEvaluator([1.0]), _ScoreByProgramEvaluator([2.0])),
+                levels=(
+                    _ScoreByProgramEvaluator([1.0]),
+                    _ScoreByProgramEvaluator([2.0]),
+                ),
                 top_k_per_level=1.5,
             )
 
@@ -463,16 +485,24 @@ class TestMultiFidelityEvaluation:
             ) -> list[FitnessResult]:
                 del context
                 self.calls.append(tuple(programs))
-                return [FitnessResult(objectives=(float(program),), metadata={}) for program in programs]
+                return [
+                    FitnessResult(objectives=(float(program),), metadata={})
+                    for program in programs
+                ]
 
         class _CallableLevel:
             def __init__(self) -> None:
                 self.calls: list[tuple[object, ...]] = []
 
-            def __call__(self, programs: Sequence[int], context: dict[str, object]) -> list[FitnessResult]:
+            def __call__(
+                self, programs: Sequence[int], context: dict[str, object]
+            ) -> list[FitnessResult]:
                 del context
                 self.calls.append(tuple(programs))
-                return [FitnessResult(objectives=(float(program),), metadata={}) for program in programs]
+                return [
+                    FitnessResult(objectives=(float(program),), metadata={})
+                    for program in programs
+                ]
 
         eval_fitness_only = _EvaluateFitnessOnly()
         callable_level = _CallableLevel()
@@ -567,7 +597,9 @@ class TestMultiFidelityEvaluation:
                 ]
 
         level0 = _DominanceEvaluator()
-        level1 = _ScoreByProgramEvaluator([2.0, 1.0, 0.0, 3.0], objectives_per_program=1)
+        level1 = _ScoreByProgramEvaluator(
+            [2.0, 1.0, 0.0, 3.0], objectives_per_program=1
+        )
 
         evaluator = MultiFidelityFitnessEvaluator(
             levels=(level0, level1),
@@ -633,16 +665,24 @@ class TestMultiFidelityEvaluation:
         assert MultiFidelityFitnessEvaluator._normalize_top_k([], 0) == []
 
     def test_level_cost_validation_paths(self) -> None:
-        with pytest.raises(ValueError, match="level_costs must have one entry per level"):
+        with pytest.raises(
+            ValueError, match="level_costs must have one entry per level"
+        ):
             MultiFidelityFitnessEvaluator(
-                levels=(_ScoreByProgramEvaluator([1.0]), _ScoreByProgramEvaluator([2.0])),
+                levels=(
+                    _ScoreByProgramEvaluator([1.0]),
+                    _ScoreByProgramEvaluator([2.0]),
+                ),
                 top_k_per_level=0.5,
                 level_costs=(1.0,),
             )
 
         with pytest.raises(ValueError, match="level_costs must be non-negative"):
             MultiFidelityFitnessEvaluator(
-                levels=(_ScoreByProgramEvaluator([1.0]), _ScoreByProgramEvaluator([2.0])),
+                levels=(
+                    _ScoreByProgramEvaluator([1.0]),
+                    _ScoreByProgramEvaluator([2.0]),
+                ),
                 top_k_per_level=0.5,
                 level_costs=(-1.0, 2.0),
             )
@@ -652,10 +692,14 @@ class TestMultiFidelityEvaluation:
             def __init__(self) -> None:
                 self.calls: list[tuple[object, ...]] = []
 
-            def evaluate(self, programs: Sequence[int], context: dict[str, object]) -> list[FitnessResult]:
+            def evaluate(
+                self, programs: Sequence[int], context: dict[str, object]
+            ) -> list[FitnessResult]:
                 del context
                 self.calls.append(tuple(programs))
-                return [FitnessResult(objectives=(1.0,), metadata={})] if programs else []
+                return (
+                    [FitnessResult(objectives=(1.0,), metadata={})] if programs else []
+                )
 
         level0 = _ScoreByProgramEvaluator([1.0, 2.0])
         level1 = _MismatchedEvaluator()
@@ -667,20 +711,29 @@ class TestMultiFidelityEvaluation:
         )
 
         evaluator._top_k_per_transition = [2]
-        with pytest.raises(ValueError, match="Evaluator returned mismatched result count"):
+        with pytest.raises(
+            ValueError, match="Evaluator returned mismatched result count"
+        ):
             evaluator.evaluate([0, 1], {})
 
         class _NoPromotionEvaluator:
             def __init__(self) -> None:
                 self.calls: list[tuple[object, ...]] = []
 
-            def evaluate(self, programs: Sequence[int], context: dict[str, object]) -> list[FitnessResult]:
+            def evaluate(
+                self, programs: Sequence[int], context: dict[str, object]
+            ) -> list[FitnessResult]:
                 del context
                 self.calls.append(tuple(programs))
-                return [FitnessResult(objectives=(float(program),), metadata={}) for program in programs]
+                return [
+                    FitnessResult(objectives=(float(program),), metadata={})
+                    for program in programs
+                ]
 
         class _Passthrough:
-            def evaluate(self, programs: Sequence[int], context: dict[str, object]) -> list[FitnessResult]:
+            def evaluate(
+                self, programs: Sequence[int], context: dict[str, object]
+            ) -> list[FitnessResult]:
                 del context
                 return [FitnessResult(objectives=(0.0,), metadata={}) for _ in programs]
 
@@ -693,7 +746,9 @@ class TestMultiFidelityEvaluation:
             objective_directions=("maximize",),
             promotion_strategy="direction_aware_first",
         )
-        no_promote_evaluator._select_by_direction_aware_first = lambda candidate_indices, _results, _budget: []  # type: ignore[method-assign]
+        no_promote_evaluator._select_by_direction_aware_first = (
+            lambda candidate_indices, _results, _budget: []
+        )  # type: ignore[method-assign]
         no_promote_evaluator.evaluate([0, 1], {})
 
     def test_scalarized_weight_shortfall_and_crowding_branches(self) -> None:
@@ -721,7 +776,9 @@ class TestMultiFidelityEvaluation:
                 ]
 
         level0 = _TwoObjectiveEvaluator()
-        level1 = _ScoreByProgramEvaluator([3.0, 2.0, 1.0, 0.0], objectives_per_program=1)
+        level1 = _ScoreByProgramEvaluator(
+            [3.0, 2.0, 1.0, 0.0], objectives_per_program=1
+        )
         evaluator = MultiFidelityFitnessEvaluator(
             levels=(level0, level1),
             top_k_per_level=2 / 4,

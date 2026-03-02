@@ -43,6 +43,30 @@ _PARAM_RANGES: dict[str, tuple[type, Any, Any, Any]] = {
     "af_max_short": (float, 0.2, 0.1, 0.5),
     "offset_on_reverse": (float, 0.0, 0.0, 1.0),
     "start_value": (float, 0.0, 0.0, 1.0),
+    # Params for existing indicators (ichimoku, keltner_channel, qqe)
+    "tenkan_period": (int, 9, 2, 50),
+    "kijun_period": (int, 26, 5, 100),
+    "senkou_b_period": (int, 52, 10, 200),
+    "displacement": (int, 26, 1, 100),
+    "atr_multiplier": (float, 2.0, 0.5, 5.0),
+    "smoothing_period": (int, 5, 2, 50),
+    "wilders_period": (int, 14, 2, 50),
+    "factor": (float, 4.236, 1.0, 10.0),
+    # Params for new indicators (Rust registry)
+    "lag": (int, 1, 1, 20),
+    "streak_period": (int, 2, 2, 20),
+    "rank_period": (int, 100, 10, 252),
+    "stochastic_period": (int, 14, 2, 50),
+    "ema_period": (int, 5, 2, 50),
+    "sigma": (float, 0.5, 0.1, 3.0),
+    "multiplier": (float, 3.0, 0.5, 10.0),
+    "gamma": (float, 0.5, 0.01, 0.99),
+    "cycle_period": (int, 10, 2, 50),
+    "smooth_period": (int, 3, 1, 20),
+    "hma_period": (int, 21, 2, 200),
+    "atr_period": (int, 14, 2, 50),
+    "std_period": (int, 20, 2, 100),
+    "std_multiplier": (float, 2.0, 0.5, 4.0),
 }
 
 # Candlestick patterns all take (open, high, low, close)

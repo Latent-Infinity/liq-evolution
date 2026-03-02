@@ -8,8 +8,11 @@ import numpy as np
 import pytest
 
 from liq.datasets.walk_forward import WalkForwardSplit
-from liq.evolution.fitness.eval_cache import FitnessEvaluationCache, compute_program_hash
 from liq.evolution.fitness import strategy_evaluator as strategy_evaluator_module
+from liq.evolution.fitness.eval_cache import (
+    FitnessEvaluationCache,
+    compute_program_hash,
+)
 from liq.evolution.fitness.strategy_evaluator import StrategyEvaluator
 from liq.gp.program.ast import TerminalNode
 from liq.gp.types import Series
@@ -32,7 +35,9 @@ def _make_split(slice_id: str | None = "time_window:split_0") -> WalkForwardSpli
     )
 
 
-def _payload_for(program_value: float, *, override_slice_id: str | None = None) -> dict[str, Any]:
+def _payload_for(
+    program_value: float, *, override_slice_id: str | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "train": {
             "metrics": {"cagr": program_value},
@@ -65,7 +70,9 @@ def _payload_for(program_value: float, *, override_slice_id: str | None = None) 
 
 
 class _CachingRunner:
-    def __init__(self, *, override_slice_id: str | None = None, base: float = 0.1) -> None:
+    def __init__(
+        self, *, override_slice_id: str | None = None, base: float = 0.1
+    ) -> None:
         self._override_slice_id = override_slice_id
         self._base = base
         self.calls: list[str | None] = []

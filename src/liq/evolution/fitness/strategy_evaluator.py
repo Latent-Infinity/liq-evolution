@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import math
-
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from liq.datasets.walk_forward import WalkForwardSplit
+from liq.evolution.errors import FitnessEvaluationError
 from liq.evolution.fitness.behavior_descriptors import (
     BEHAVIOR_DESCRIPTOR_MAX_LEVERAGE,
     BEHAVIOR_DESCRIPTOR_SCHEMA_VERSION,
@@ -16,49 +16,46 @@ from liq.evolution.fitness.behavior_descriptors import (
     extract_behavior_descriptors,
     normalize_behavior_descriptor_value,
 )
-from liq.evolution.fitness.evaluation_schema import (
-    BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY,
-    BEHAVIOR_DESCRIPTOR_NET_EXPOSURE,
-    BEHAVIOR_DESCRIPTOR_TAIL_RISK,
-    BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
-    BEHAVIOR_DESCRIPTOR_STABILITY,
-    BEHAVIOR_DESCRIPTOR_TURNOVER,
-    SLICE_TYPE_EVENT,
-    SLICE_TYPE_INSTRUMENT,
-    SLICE_TYPE_LIQUIDITY,
-    SLICE_TYPE_TIME_WINDOW,
-    METADATA_KEY_BEHAVIOR_DESCRIPTORS,
-    METADATA_KEY_CONSTRAINT_VIOLATIONS,
-    METADATA_KEY_PER_SPLIT_METRICS,
-    METADATA_KEY_RAW_OBJECTIVES,
-    METADATA_KEY_SLICE_SCORES,
-    ObjectiveDirection,
-    SUPPORTED_BEHAVIOR_DESCRIPTORS,
-    to_loss_form,
-)
-from liq.evolution.fitness.evaluation_schema import (
-    BEHAVIOR_DESCRIPTOR_BENCHMARK_CORRELATION,
-    BEHAVIOR_DESCRIPTOR_DRAWDOWN_PROFILE,
-)
-from liq.evolution.fitness.evaluation_schema import validate_evaluation_metadata
-from liq.evolution.errors import FitnessEvaluationError
-from liq.evolution.validation import ConstraintPolicy
 from liq.evolution.fitness.eval_cache import (
     FitnessEvaluationCache,
     compute_fingerprint,
     compute_program_hash,
 )
+from liq.evolution.fitness.evaluation_schema import (
+    BEHAVIOR_DESCRIPTOR_BENCHMARK_CORRELATION,
+    BEHAVIOR_DESCRIPTOR_DRAWDOWN_PROFILE,
+    BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY,
+    BEHAVIOR_DESCRIPTOR_NET_EXPOSURE,
+    BEHAVIOR_DESCRIPTOR_STABILITY,
+    BEHAVIOR_DESCRIPTOR_TAIL_RISK,
+    BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
+    BEHAVIOR_DESCRIPTOR_TURNOVER,
+    METADATA_KEY_BEHAVIOR_DESCRIPTORS,
+    METADATA_KEY_CONSTRAINT_VIOLATIONS,
+    METADATA_KEY_PER_SPLIT_METRICS,
+    METADATA_KEY_RAW_OBJECTIVES,
+    METADATA_KEY_SLICE_SCORES,
+    SLICE_TYPE_EVENT,
+    SLICE_TYPE_INSTRUMENT,
+    SLICE_TYPE_LIQUIDITY,
+    SLICE_TYPE_TIME_WINDOW,
+    SUPPORTED_BEHAVIOR_DESCRIPTORS,
+    ObjectiveDirection,
+    to_loss_form,
+    validate_evaluation_metadata,
+)
+from liq.evolution.validation import ConstraintPolicy
+from liq.gp.program.ast import Program
+from liq.gp.program.eval import evaluate as gp_evaluate
 from liq.gp.types import FitnessResult
 from liq.sim.fx_eval import (
     capacity_proxy,
-    turnover_from_positions,
+    cvar_from_pnl,
     max_exposure,
     summarize_fx_performance,
     tail_stability,
+    turnover_from_positions,
 )
-from liq.sim.fx_eval import cvar_from_pnl
-from liq.gp.program.ast import Program
-from liq.gp.program.eval import evaluate as gp_evaluate
 
 DEFAULT_OBJECTIVES = (
     "cagr",
@@ -124,7 +121,9 @@ class StrategyEvaluator:
 
     def __init__(
         self,
-        backtest_runner: Callable[[Any, Mapping[str, Any], WalkForwardSplit], Mapping[str, Any]],
+        backtest_runner: Callable[
+            [Any, Mapping[str, Any], WalkForwardSplit], Mapping[str, Any]
+        ],
         splits: Sequence[WalkForwardSplit],
         *,
         objectives: Sequence[str] = DEFAULT_OBJECTIVES,
@@ -164,20 +163,22 @@ class StrategyEvaluator:
         if not self._objectives:
             raise ValueError("at least one objective is required")
         if objective_directions is None:
-            objective_directions = tuple(DEFAULT_OBJECTIVE_DIRECTIONS[: len(self._objectives)])
+            objective_directions = tuple(
+                DEFAULT_OBJECTIVE_DIRECTIONS[: len(self._objectives)]
+            )
             if len(objective_directions) < len(self._objectives):
                 raise ValueError("missing default direction for custom objective list")
         else:
             objective_directions = tuple(objective_directions)
             if len(objective_directions) != len(self._objectives):
-                raise ValueError(
-                    "objective_directions must match objectives length"
-                )
+                raise ValueError("objective_directions must match objectives length")
             if any(
                 direction not in {"maximize", "minimize"}
                 for direction in objective_directions
             ):
-                raise ValueError("objective_directions must be 'maximize' or 'minimize'")
+                raise ValueError(
+                    "objective_directions must be 'maximize' or 'minimize'"
+                )
 
         configured_split_weights = split_weights or {}
         unknown_split_weight_keys = set(configured_split_weights) - {
@@ -256,12 +257,14 @@ class StrategyEvaluator:
         """Backward-compatible fitness-evaluation alias."""
         return self.evaluate(programs, context)
 
-    def _evaluate_single(self, program: Program, context: Mapping[str, Any]) -> FitnessResult:
+    def _evaluate_single(
+        self, program: Program, context: Mapping[str, Any]
+    ) -> FitnessResult:
         strategy = _ProgramStrategy(program)
         split_metrics: dict[str, dict[str, float]] = {}
         slice_scores: dict[str, float] = {}
-        raw_objective_sums = {name: 0.0 for name in self._objectives}
-        raw_objective_weights = {name: 0.0 for name in self._objectives}
+        raw_objective_sums = dict.fromkeys(self._objectives, 0.0)
+        raw_objective_weights = dict.fromkeys(self._objectives, 0.0)
         constraint_violations: dict[str, float] = {}
         descriptor_profiles: list[BehaviorDescriptorProfile] = []
         program_hash = compute_program_hash(program)
@@ -298,9 +301,7 @@ class StrategyEvaluator:
                 ) from exc
 
             if split_payload is None:
-                raise FitnessEvaluationError(
-                    "backtest runner returned no payload"
-                )
+                raise FitnessEvaluationError("backtest runner returned no payload")
 
             split_id = self._resolve_split_id(split_payload, split.slice_id)
             if not split_id:
@@ -312,10 +313,7 @@ class StrategyEvaluator:
                     self._cache_fingerprint,
                     split_payload,
                 )
-                if (
-                    split_id_fallback is not None
-                    and split_id_fallback != split_id
-                ):
+                if split_id_fallback is not None and split_id_fallback != split_id:
                     self._cache.put(
                         program_hash,
                         split_id_fallback,
@@ -417,7 +415,7 @@ class StrategyEvaluator:
 
     def _normalize_split_payload(
         self,
-            split_payload: Mapping[str, Any],
+        split_payload: Mapping[str, Any],
         split_id: str | None,
     ) -> dict[str, Mapping[str, Any]]:
         if not isinstance(split_payload, Mapping):
@@ -466,7 +464,12 @@ class StrategyEvaluator:
         split_index: int,
     ) -> str:
         """Build a stable synthetic id when slice IDs are missing."""
-        def _bound(window: slice) -> tuple[int | None, int | None]:
+
+        def _bound(
+            window: slice | tuple[object, object],
+        ) -> tuple[object | None, object | None]:
+            if isinstance(window, tuple):
+                return (window[0], window[1])
             return (window.start, window.stop)
 
         train_bounds = _bound(split.train)
@@ -479,7 +482,9 @@ class StrategyEvaluator:
             f"test={test_bounds[0]}:{test_bounds[1]}"
         )
 
-    def _extract_phase_metrics(self, phase_payload: Mapping[str, Any]) -> dict[str, float]:
+    def _extract_phase_metrics(
+        self, phase_payload: Mapping[str, Any]
+    ) -> dict[str, float]:
         metrics = _safe_mapping_float_dict(phase_payload.get("metrics"))
         traces = self._extract_traces(phase_payload)
         traces = traces if traces is not None else {}
@@ -547,7 +552,9 @@ class StrategyEvaluator:
     ) -> dict[str, float]:
         return _safe_mapping_float_dict(phase_payload.get("slice_scores"))
 
-    def _extract_traces(self, phase_payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    def _extract_traces(
+        self, phase_payload: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
         traces = phase_payload.get("traces")
         if isinstance(traces, Mapping):
             return dict(traces)
@@ -583,12 +590,14 @@ class StrategyEvaluator:
                 None,
                 descriptor_names=self._behavior_descriptor_names,
             )
-            return {name: value for name, value in profile.normalized.items()}
+            return dict(profile.normalized.items())
 
         keys = set().union(*(profile.raw.keys() for profile in profiles))
         averaged_raw: dict[str, float] = {}
         for key in keys:
-            values = [float(profile.raw[key]) for profile in profiles if key in profile.raw]
+            values = [
+                float(profile.raw[key]) for profile in profiles if key in profile.raw
+            ]
             if not values:
                 continue
             averaged_raw[key] = sum(values) / len(values)
@@ -609,9 +618,11 @@ class _ProgramStrategy:
         return None
 
     def predict(self, features: Any) -> Any:
-        return gp_evaluate(self._program, {"close": features.to_numpy()}) if hasattr(
-            features, "to_numpy"
-        ) else gp_evaluate(self._program, features)
+        return (
+            gp_evaluate(self._program, {"close": features.to_numpy()})
+            if hasattr(features, "to_numpy")
+            else gp_evaluate(self._program, features)
+        )
 
 
 def _safe_mapping_float_dict(value: Any) -> dict[str, float]:

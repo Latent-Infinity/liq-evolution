@@ -459,7 +459,9 @@ class TestGPStrategyAdapterWarmStart:
         adapter.fit(_make_dataframe())
         adapter.fit(_make_dataframe())
 
-        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs["seed_programs"]
+        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs[
+            "seed_programs"
+        ]
         assert second_call_seed_programs == [seed, seed]
 
     @patch("liq.evolution.adapters.runner_strategy.evolve")
@@ -494,7 +496,9 @@ class TestGPStrategyAdapterWarmStart:
         assert called_seed_programs == [seed]
 
     @patch("liq.evolution.adapters.runner_strategy.evolve")
-    def test_from_evolution_config_uses_augment_mode(self, mock_evolve, tmp_path) -> None:
+    def test_from_evolution_config_uses_augment_mode(
+        self, mock_evolve, tmp_path
+    ) -> None:
         from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
         from liq.evolution.config import EvolutionConfig
         from liq.gp.config import GPConfig
@@ -523,11 +527,15 @@ class TestGPStrategyAdapterWarmStart:
         adapter.fit(_make_dataframe())
         adapter.fit(_make_dataframe())
 
-        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs["seed_programs"]
+        second_call_seed_programs = mock_evolve.call_args_list[1].kwargs[
+            "seed_programs"
+        ]
         assert second_call_seed_programs == [seed, seed]
 
     @patch("liq.evolution.adapters.runner_strategy.evolve")
-    def test_from_evolution_config_seed_programs_override_path(self, mock_evolve, tmp_path) -> None:
+    def test_from_evolution_config_seed_programs_override_path(
+        self, mock_evolve, tmp_path
+    ) -> None:
         from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
         from liq.evolution.config import EvolutionConfig
         from liq.gp.config import GPConfig
@@ -555,6 +563,47 @@ class TestGPStrategyAdapterWarmStart:
         called_seed_programs = mock_evolve.call_args.kwargs["seed_programs"]
         assert called_seed_programs == [override_seed]
 
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_warm_start_replace_keeps_only_new_best(self, mock_evolve) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        existing = _make_terminal("close")
+        evolved = _make_terminal("volume")
+        mock_evolve.return_value = _make_evolution_result(evolved)
+
+        adapter = GPStrategyAdapter(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            MagicMock(),
+            seed_programs=[existing],
+            warm_start=True,
+        )
+        adapter.fit(_make_dataframe())
+        assert adapter._seed_programs == [evolved]
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_warm_start_augment_appends_previous_best(self, mock_evolve) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        existing = _make_terminal("close")
+        evolved = _make_terminal("volume")
+        mock_evolve.return_value = _make_evolution_result(evolved)
+
+        adapter = GPStrategyAdapter(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            MagicMock(),
+            seed_programs=[existing],
+            warm_start=True,
+            warm_start_mode="augment",
+        )
+        adapter.fit(_make_dataframe())
+        assert adapter._seed_programs == [existing, evolved]
+
 
 # ------------------------------------------------------------------ #
 #  Protocol compliance
@@ -573,3 +622,63 @@ class TestGPStrategyAdapterProtocol:
             MagicMock(),
         )
         assert isinstance(adapter, GPStrategy)
+
+
+class TestLoadSeedPrograms:
+    def test_load_seed_programs_supports_common_payload_shapes(self, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import _load_seed_programs
+        from liq.gp.primitives.registry import PrimitiveRegistry
+        from liq.gp.program.serialize import serialize
+
+        registry = PrimitiveRegistry()
+        seed = _make_terminal("close")
+        serialized = serialize(seed)
+
+        for payload in (
+            [serialized],
+            {"seed_programs": [serialized]},
+            {"best_program": serialized},
+            {"pareto_front": [serialized]},
+            {"entry_program": serialized},
+        ):
+            path = tmp_path / "seed_programs.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            loaded = _load_seed_programs(path, registry)
+            assert [program.name for program in loaded] == [seed.name]
+
+    def test_load_seed_programs_handles_invalid_payloads(self, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import _load_seed_programs
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        registry = PrimitiveRegistry()
+        path = tmp_path / "seed_programs.json"
+
+        path.write_text("not-json", encoding="utf-8")
+        with pytest.raises(AdapterError, match="Invalid JSON"):
+            _load_seed_programs(path, registry)
+
+        path.write_text(json.dumps({"unexpected": [123]}), encoding="utf-8")
+        with pytest.raises(AdapterError, match="Unsupported seed payload"):
+            _load_seed_programs(path, registry)
+
+        path.write_text(json.dumps({"seed_programs": [1, 2]}), encoding="utf-8")
+        with pytest.raises(AdapterError, match="Seed item at index 0"):
+            _load_seed_programs(path, registry)
+
+        path.write_text(json.dumps({}), encoding="utf-8")
+        with pytest.raises(AdapterError, match="Unsupported seed payload"):
+            _load_seed_programs(path, registry)
+
+        path.write_text(json.dumps([]), encoding="utf-8")
+        with pytest.raises(AdapterError, match="No seed programs"):
+            _load_seed_programs(path, registry)
+
+    def test_load_seed_programs_rejects_failed_deserialization(self, tmp_path) -> None:
+        from liq.evolution.adapters.runner_strategy import _load_seed_programs
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        registry = PrimitiveRegistry()
+        path = tmp_path / "seed_programs.json"
+        path.write_text(json.dumps([{"not": "a program payload"}]), encoding="utf-8")
+        with pytest.raises(AdapterError, match="Failed to deserialize seed item"):
+            _load_seed_programs(path, registry)

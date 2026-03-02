@@ -298,12 +298,16 @@ def _load_seed_programs(
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise AdapterError(f"Failed to read seed programs from {path!s}: {exc}") from exc
+        raise AdapterError(
+            f"Failed to read seed programs from {path!s}: {exc}"
+        ) from exc
 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise AdapterError(f"Invalid JSON in seed programs path {path!s}: {exc}") from exc
+        raise AdapterError(
+            f"Invalid JSON in seed programs path {path!s}: {exc}"
+        ) from exc
 
     if isinstance(payload, dict):
         if "seed_programs" in payload:

@@ -193,9 +193,7 @@ class FitnessConfig(BaseModel, frozen=True):
     """Canonical phase-0 configuration for fitness-stage control."""
 
     objectives: tuple[str, ...] = ("fitness",)
-    objective_directions: tuple[Literal["maximize", "minimize"], ...] = (
-        "maximize",
-    )
+    objective_directions: tuple[Literal["maximize", "minimize"], ...] = ("maximize",)
     metric: Literal["f1", "precision_at_k", "accuracy"] = "f1"
     stage_a_metric: Literal["f1", "precision_at_k", "accuracy"] = "f1"
     stage_b_enabled: bool = False

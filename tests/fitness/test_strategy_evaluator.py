@@ -391,22 +391,32 @@ class TestStrategyEvaluator:
         )
         metadata = results[0].metadata
 
-        assert metadata[METADATA_KEY_SLICE_SCORES][
-            "event:earnings:pre_announcement:time_window:split_0:train"
-        ] == 0.41
-        assert metadata[METADATA_KEY_SLICE_SCORES][
-            "liquidity:tight_spread:time_window:split_0:train"
-        ] == 0.12
-        assert metadata[METADATA_KEY_SLICE_SCORES][
-            "instrument:SPY:time_window:split_0:train"
-        ] == 0.27
-        assert metadata[METADATA_KEY_SLICE_SCORES][
-            "time_window:split_legacy:time_window:split_0:train"
-        ] == 0.33
-
         assert (
-            "time_window:split_0:train:cagr" in metadata[METADATA_KEY_SLICE_SCORES]
+            metadata[METADATA_KEY_SLICE_SCORES][
+                "event:earnings:pre_announcement:time_window:split_0:train"
+            ]
+            == 0.41
         )
+        assert (
+            metadata[METADATA_KEY_SLICE_SCORES][
+                "liquidity:tight_spread:time_window:split_0:train"
+            ]
+            == 0.12
+        )
+        assert (
+            metadata[METADATA_KEY_SLICE_SCORES][
+                "instrument:SPY:time_window:split_0:train"
+            ]
+            == 0.27
+        )
+        assert (
+            metadata[METADATA_KEY_SLICE_SCORES][
+                "time_window:split_legacy:time_window:split_0:train"
+            ]
+            == 0.33
+        )
+
+        assert "time_window:split_0:train:cagr" in metadata[METADATA_KEY_SLICE_SCORES]
 
     def test_split_scores_are_keyed_by_runner_payload_slice_id(self) -> None:
         evaluator = StrategyEvaluator(
@@ -424,8 +434,10 @@ class TestStrategyEvaluator:
 
         metadata = result.metadata
         assert "time_window:fold_77:train:cagr" in metadata[METADATA_KEY_SLICE_SCORES]
-        assert "time_window:fold_77:validate:max_drawdown" in metadata[METADATA_KEY_SLICE_SCORES]
         assert (
-            "time_window:split_0:train:cagr"
-            not in metadata[METADATA_KEY_SLICE_SCORES]
+            "time_window:fold_77:validate:max_drawdown"
+            in metadata[METADATA_KEY_SLICE_SCORES]
+        )
+        assert (
+            "time_window:split_0:train:cagr" not in metadata[METADATA_KEY_SLICE_SCORES]
         )

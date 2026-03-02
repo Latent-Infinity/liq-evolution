@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import json
+import math
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 from liq.evolution.fitness.evaluation_schema import ObjectiveDirection
 from liq.gp.types import FitnessResult
 
-
-PromotionStrategy = (
-    "direction_aware_first", "scalarized", "pareto", "niche"
-)
+PromotionStrategy = Literal[
+    "direction_aware_first",
+    "scalarized",
+    "pareto",
+    "niche",
+]
 
 
 class MultiFidelityFitnessEvaluator:
@@ -66,15 +68,16 @@ class MultiFidelityFitnessEvaluator:
 
         for direction in self._objective_directions:
             if direction not in {"maximize", "minimize"}:
-                raise ValueError("objective_directions must be 'maximize' or 'minimize'")
+                raise ValueError(
+                    "objective_directions must be 'maximize' or 'minimize'"
+                )
 
-        if scalarization_weights is not None:
-            if any(weight < 0.0 for weight in scalarization_weights):
-                raise ValueError("scalarization_weights must be >= 0")
+        if scalarization_weights is not None and any(
+            weight < 0.0 for weight in scalarization_weights
+        ):
+            raise ValueError("scalarization_weights must be >= 0")
         self._scalarization_weights = (
-            tuple(scalarization_weights)
-            if scalarization_weights is not None
-            else None
+            tuple(scalarization_weights) if scalarization_weights is not None else None
         )
 
         if len(self._levels) > 1:
@@ -91,7 +94,9 @@ class MultiFidelityFitnessEvaluator:
                 raise ValueError("level_costs must have one entry per level")
             if any(cost < 0.0 for cost in self._level_costs):
                 raise ValueError("level_costs must be non-negative")
-            for prev, nxt in zip(self._level_costs, self._level_costs[1:]):
+            for prev, nxt in zip(
+                self._level_costs, self._level_costs[1:], strict=False
+            ):
                 if nxt < prev:
                     raise ValueError("level_costs must be non-decreasing")
         else:
@@ -120,7 +125,9 @@ class MultiFidelityFitnessEvaluator:
                 "level_count": len(self._levels),
                 "level_costs": self._level_costs,
             }
-            raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+            raw = json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), default=str
+            )
             self._fingerprint_cache = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return self._fingerprint_cache
 
@@ -216,7 +223,9 @@ class MultiFidelityFitnessEvaluator:
         evaluator = self._levels[level]
         if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):
             return evaluator.evaluate(programs, context)
-        if hasattr(evaluator, "evaluate_fitness") and callable(evaluator.evaluate_fitness):
+        if hasattr(evaluator, "evaluate_fitness") and callable(
+            evaluator.evaluate_fitness
+        ):
             return evaluator.evaluate_fitness(programs, context)
         if callable(evaluator):
             return evaluator(programs, context)
@@ -250,7 +259,9 @@ class MultiFidelityFitnessEvaluator:
     ) -> list[int]:
         del level
         if self._promotion_strategy == "direction_aware_first":
-            return self._select_by_direction_aware_first(candidate_indices, results, budget)
+            return self._select_by_direction_aware_first(
+                candidate_indices, results, budget
+            )
         if self._promotion_strategy == "scalarized":
             return self._select_by_scalarized_score(candidate_indices, results, budget)
         if self._promotion_strategy == "pareto":
@@ -264,8 +275,7 @@ class MultiFidelityFitnessEvaluator:
         budget: int,
     ) -> list[int]:
         scored = [
-            (self._rank_key(results[idx], 0, idx), idx)
-            for idx in candidate_indices
+            (self._rank_key(results[idx], 0, idx), idx) for idx in candidate_indices
         ]
         scored.sort(key=lambda item: item[0])
         return [idx for _, idx in scored[:budget]]
@@ -288,16 +298,14 @@ class MultiFidelityFitnessEvaluator:
                     break
 
                 weight = 1.0
-                if self._scalarization_weights is not None:
-                    if obj_idx < len(self._scalarization_weights):
-                        weight = float(self._scalarization_weights[obj_idx])
+                if self._scalarization_weights is not None and obj_idx < len(
+                    self._scalarization_weights
+                ):
+                    weight = float(self._scalarization_weights[obj_idx])
 
                 oriented = value if direction == "maximize" else -value
                 score += oriented * weight
-            if bad:
-                ranked = (1.0, 0.0, idx)
-            else:
-                ranked = (0.0, -score, idx)
+            ranked = (1.0, 0.0, idx) if bad else (0.0, -score, idx)
             scored.append((ranked, idx))
 
         scored.sort(key=lambda item: item[0])
@@ -347,8 +355,7 @@ class MultiFidelityFitnessEvaluator:
         selected: list[tuple[tuple[float, float, int], int]] = []
         for _, candidate_group in sorted(groups.items()):
             scored = [
-                (self._rank_key(results[idx], 0, idx), idx)
-                for idx in candidate_group
+                (self._rank_key(results[idx], 0, idx), idx) for idx in candidate_group
             ]
             scored.sort(key=lambda item: item[0])
             selected.extend(scored[:per_niche])
@@ -411,7 +418,7 @@ class MultiFidelityFitnessEvaluator:
         if len(indices) <= 2:
             return sorted(indices)
 
-        crowding: dict[int, float] = {idx: 0.0 for idx in indices}
+        crowding: dict[int, float] = dict.fromkeys(indices, 0.0)
         for obj_idx, direction in enumerate(self._objective_directions):
             finite: list[tuple[int, float]] = []
             for idx in indices:
@@ -433,7 +440,7 @@ class MultiFidelityFitnessEvaluator:
             for idx in (finite[0][0], finite[-1][0]):
                 crowding[idx] = float("inf")
 
-            for left_idx, right_idx in zip(finite[1:-1], finite[2:]):
+            for left_idx, right_idx in zip(finite[1:-1], finite[2:], strict=False):
                 mid = left_idx[0]
                 crowding[mid] += (right_idx[1] - left_idx[1]) / range_width
 
@@ -447,11 +454,16 @@ class MultiFidelityFitnessEvaluator:
         )
         return sorted_indices
 
-    def _rank_key(self, result: FitnessResult, objective_idx: int, index: int) -> tuple[float, float, int]:
+    def _rank_key(
+        self, result: FitnessResult, objective_idx: int, index: int
+    ) -> tuple[float, float, int]:
         if len(self._objective_directions) <= objective_idx:
             direction = "maximize"
             if not self._warned_incomplete_objectives:
-                warnings.warn("objective_directions shorter than objective index; defaulting to maximize")
+                warnings.warn(
+                    "objective_directions shorter than objective index; defaulting to maximize",
+                    stacklevel=2,
+                )
                 self._warned_incomplete_objectives = True
         else:
             direction = self._objective_directions[objective_idx]
@@ -469,6 +481,7 @@ class MultiFidelityFitnessEvaluator:
                 warnings.warn(
                     "fitness result has fewer objectives than expected;"
                     " treating missing objectives as NaN",
+                    stacklevel=2,
                 )
                 self._warned_incomplete_objectives = True
             return float("nan")

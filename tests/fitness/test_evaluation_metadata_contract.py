@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+
 import pytest
 
 from liq.evolution.fitness.evaluation_schema import (
@@ -11,9 +12,9 @@ from liq.evolution.fitness.evaluation_schema import (
     METADATA_KEY_PER_SPLIT_METRICS,
     METADATA_KEY_RAW_OBJECTIVES,
     METADATA_KEY_SLICE_SCORES,
-    validate_slice_id,
     to_loss_form,
     validate_evaluation_metadata,
+    validate_slice_id,
 )
 
 
@@ -119,7 +120,9 @@ class TestValidateEvaluationMetadata:
             expected_objective_count=1,
             objective_directions=("maximize",),
         )
-        assert any("unsupported behavior descriptor key" in err.message for err in errors)
+        assert any(
+            "unsupported behavior descriptor key" in err.message for err in errors
+        )
 
     def test_fails_on_invalid_slice_id(self) -> None:
         metadata = _valid_metadata()
@@ -180,5 +183,7 @@ class TestToLossForm:
         assert value == -1e2
 
     def test_invalid_direction_raises(self) -> None:
-        with pytest.raises(ValueError, match="direction must be 'maximize' or 'minimize'"):
+        with pytest.raises(
+            ValueError, match="direction must be 'maximize' or 'minimize'"
+        ):
             to_loss_form(1.0, "bad")  # type: ignore[arg-type]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 
 from liq.evolution.fitness.evaluation_schema import (
     BEHAVIOR_DESCRIPTOR_BENCHMARK_CORRELATION,
@@ -20,7 +21,6 @@ from liq.evolution.fitness.evaluation_schema import (
 from liq.sim.fx_eval import (
     capacity_proxy,
     cvar_from_pnl,
-    max_exposure,
     tail_stability,
     turnover_from_positions,
 )
@@ -97,9 +97,12 @@ class BehaviorDescriptorProfile:
 
 def _to_float_list(values: object) -> list[float]:
     """Parse nested trace payloads into finite floats."""
-    source = values
+    source: Any = values
     if isinstance(values, Mapping):
-        source = values.get("values", values)
+        mapped_values = cast(Mapping[str, Any], values)
+        source = mapped_values.get("values")
+        if source is None:
+            source = values
     if source is None:
         return []
 
@@ -107,7 +110,7 @@ def _to_float_list(values: object) -> list[float]:
         return []
 
     values_list: list[float] = []
-    for item in source:
+    for item in cast(Iterable[Any], source):
         try:
             parsed = float(item)
         except (TypeError, ValueError):
@@ -123,9 +126,7 @@ def _to_float_list(values: object) -> list[float]:
 def _clamp(value: float, min_value: float, max_value: float) -> float:
     clamped = max(min_value, min(max_value, value))
     if clamped != value:
-        logger.warning(
-            "descriptor value clamped from %s to %s", value, clamped
-        )
+        logger.warning("descriptor value clamped from %s to %s", value, clamped)
     return clamped
 
 
@@ -182,11 +183,10 @@ def _correlation(a: Sequence[float], b: Sequence[float]) -> float:
     b_var = sum((value - b_mean) ** 2 for value in b_values) / n
     if a_var == 0.0 or b_var == 0.0:
         return 0.0
-    covariance = sum(
-        (a_values[idx] - a_mean) * (b_values[idx] - b_mean)
-        for idx in range(n)
-    ) / n
-    return covariance / (a_var ** 0.5 * b_var ** 0.5)
+    covariance = (
+        sum((a_values[idx] - a_mean) * (b_values[idx] - b_mean) for idx in range(n)) / n
+    )
+    return covariance / (a_var**0.5 * b_var**0.5)
 
 
 def _holding_period_proxy(position: Sequence[float]) -> float:
@@ -276,7 +276,9 @@ def extract_behavior_descriptors(
     descriptor_names: Sequence[str] | None = None,
 ) -> BehaviorDescriptorProfile:
     """Extract deterministic raw and normalized behavior descriptors."""
-    requested = descriptor_names if descriptor_names is not None else tuple(_DESCRIPTOR_SPECS)
+    requested = (
+        descriptor_names if descriptor_names is not None else tuple(_DESCRIPTOR_SPECS)
+    )
     payload = trace_payload or {}
     position = _to_float_list(payload.get("position_trace"))
     equity = _to_float_list(payload.get("equity_curve"))
@@ -292,7 +294,9 @@ def extract_behavior_descriptors(
     normalized: dict[str, float] = {}
 
     calculators = {
-        BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY: lambda: _holding_period_proxy(position),
+        BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY: lambda: _holding_period_proxy(
+            position
+        ),
         BEHAVIOR_DESCRIPTOR_TURNOVER: lambda: turnover_from_positions(position),
         BEHAVIOR_DESCRIPTOR_NET_EXPOSURE: lambda: _net_exposure(position),
         BEHAVIOR_DESCRIPTOR_MAX_LEVERAGE: lambda: _max_leverage(position, equity),

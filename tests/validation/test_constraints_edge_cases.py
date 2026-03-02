@@ -151,9 +151,7 @@ class TestConstraintNoNegativeCashEdgePaths:
         assert result is None
 
     def test_empty_cash_trace_returns_none(self) -> None:
-        result = constraint_no_negative_cash(
-            _program(), {"traces": {"cash_trace": []}}
-        )
+        result = constraint_no_negative_cash(_program(), {"traces": {"cash_trace": []}})
         assert result is None
 
     def test_missing_cash_trace_key(self) -> None:
@@ -192,9 +190,7 @@ class TestConstraintMaxLeverageEdgePaths:
         assert result is None
 
     def test_traces_without_position_or_equity(self) -> None:
-        result = constraint_max_leverage(
-            _program(), {"traces": {"other": [1.0]}}
-        )
+        result = constraint_max_leverage(_program(), {"traces": {"other": [1.0]}})
         assert result is None
 
 
@@ -216,9 +212,7 @@ class TestConstraintPolicyEdgePaths:
     def test_non_finite_penalty_values_ignored(self) -> None:
         """Check that non-finite penalty values from checks are ignored."""
 
-        def bad_check(
-            _program: object, _payload: object
-        ) -> dict[str, float] | None:
+        def bad_check(_program: object, _payload: object) -> dict[str, float] | None:
             return {"test_violation": float("inf")}
 
         policy = ConstraintPolicy(checks=(bad_check,))

@@ -22,6 +22,7 @@ from liq.evolution.errors import AdapterError, ParallelExecutionError
 
 logger = logging.getLogger(__name__)
 
+
 class _EvaluatorProtocol(Protocol):
     def evaluate(self, programs: list[Any], context: Any) -> list[Any]: ...
 
@@ -31,7 +32,9 @@ class _EvaluatorFitnessProtocol(Protocol):
 
 
 Evaluator = (
-    _EvaluatorProtocol | _EvaluatorFitnessProtocol | Callable[[list[Any], Any], list[Any]]
+    _EvaluatorProtocol
+    | _EvaluatorFitnessProtocol
+    | Callable[[list[Any], Any], list[Any]]
 )
 
 
