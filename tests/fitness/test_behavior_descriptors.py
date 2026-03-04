@@ -14,6 +14,8 @@ from liq.evolution.fitness.behavior_descriptors import (
     BEHAVIOR_DESCRIPTOR_TAIL_RISK,
     BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
     BEHAVIOR_DESCRIPTOR_TURNOVER,
+    _DESCRIPTOR_SPECS,
+    _DescriptorSpec,
     _benchmark_correlation,
     _clamp,
     _correlation,
@@ -227,3 +229,42 @@ class TestBehaviorDescriptorHelpers:
 
     def test_drawdown_profile_short_equity_defaults_to_zero(self) -> None:
         assert _drawdown_profile([10.0]) == 0.0
+
+
+def test_to_float_list_with_mapping_missing_values_key_uses_mapping_payload() -> None:
+    assert _to_float_list({"foo": [1.0, 2.0], "bar": 3.0}) == []
+
+
+def test_max_drawdown_tracks_zero_peak_path() -> None:
+    assert _max_drawdown([0.0, 4.0, 3.0]) == 0.25
+
+
+def test_correlation_on_degenerate_inputs_returns_zero() -> None:
+    assert _correlation([1.0, 2.0], [1.0, 2.0]) == 1.0
+
+
+def test_benchmark_correlation_uses_base_and_benchmark_vectors() -> None:
+    value = _benchmark_correlation(
+        [1.0, 2.0, 4.0, 8.0],
+        [1.0, 2.0, 3.0],
+        [10.0, 20.0, 40.0, 80.0],
+    )
+    assert isinstance(value, float)
+
+
+def test_unknown_normalizer_defaults_to_identity() -> None:
+    marker = "__test_unknown_normalizer__"
+    prior = _DESCRIPTOR_SPECS.get(marker)
+    _DESCRIPTOR_SPECS[marker] = _DescriptorSpec(
+        raw_min=0.0,
+        raw_max=1.0,
+        normalizer="mystery",
+    )
+    try:
+        normalized = _normalize(marker, 2.0)
+        assert normalized == 1.0
+    finally:
+        if prior is None:
+            del _DESCRIPTOR_SPECS[marker]
+        else:
+            _DESCRIPTOR_SPECS[marker] = prior

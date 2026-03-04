@@ -51,6 +51,18 @@ def test_load_payload_reports_invalid_json(tmp_path: Path) -> None:
         seed_config.load_seed_manifest(path)
 
 
+def test_load_payload_reports_json_read_error(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "seeds.json"
+    _write(path, "[]")
+
+    def _raise_read_error(*_args, **_kwargs):
+        raise OSError("read denied")
+
+    monkeypatch.setattr(Path, "read_text", _raise_read_error)
+    with pytest.raises(ConfigurationError, match="Failed to read seed config"):
+        seed_config.load_seed_manifest(path)
+
+
 def test_load_payload_reports_yaml_import_error(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "seeds.yaml"
     _write(path, "strategy: momentum")
@@ -69,6 +81,26 @@ def test_load_payload_handles_valid_yaml(tmp_path: Path) -> None:
     manifest = seed_config.load_seed_manifest(path)
     assert len(manifest.seeds) == 1
     assert manifest.seeds[0].strategy == "momentum"
+
+
+def test_load_payload_reports_yaml_read_error(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "seeds.yaml"
+    _write(path, "strategy: momentum\n")
+
+    def _raise_read_error(*_args, **_kwargs):
+        raise OSError("read denied")
+
+    monkeypatch.setattr(Path, "read_text", _raise_read_error)
+    with pytest.raises(ConfigurationError, match="Failed to read seed config"):
+        seed_config.load_seed_manifest(path)
+
+
+def test_load_payload_reports_invalid_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "seeds.yaml"
+    _write(path, "seed: [1, 2")
+
+    with pytest.raises(ConfigurationError, match="Invalid YAML in seed config"):
+        seed_config.load_seed_manifest(path)
 
 
 def test_coerce_seed_entries_rejects_invalid_list_entry(tmp_path: Path) -> None:
@@ -98,6 +130,21 @@ def test_coerce_seed_entries_rejects_bad_dict_payload_variants(tmp_path: Path) -
         match="Invalid seed config format in .*expected object with strategy/seed/seeds or array",
     ):
         seed_config._coerce_seed_entries({"unknown": 1}, source)
+
+
+def test_coerce_seed_entries_accepts_seeds_and_seed_shapes(tmp_path: Path) -> None:
+    source = tmp_path / "seeds.json"
+    many = seed_config._coerce_seed_entries(
+        {"seeds": [{"strategy": "momentum"}]},
+        source,
+    )
+    single = seed_config._coerce_seed_entries(
+        {"seed": {"strategy": "trend"}},
+        source,
+    )
+
+    assert many == [{"strategy": "momentum"}]
+    assert single == [{"strategy": "trend"}]
 
 
 def test_load_manifest_from_payload_variants(tmp_path: Path) -> None:
@@ -130,6 +177,22 @@ def test_load_manifest_reports_entry_validation_error(tmp_path: Path) -> None:
         seed_config.load_seed_manifest(broken)
 
 
+def test_load_manifest_reports_manifest_validation_error(tmp_path: Path) -> None:
+    broken = tmp_path / "broken_manifest.json"
+    _write(broken, '{"schema_version": "invalid", "seeds": []}')
+
+    with pytest.raises(ConfigurationError, match="Invalid seed manifest in .*"):
+        seed_config.load_seed_manifest(broken)
+
+
+def test_load_manifest_reports_dict_entry_validation_error(tmp_path: Path) -> None:
+    broken = tmp_path / "broken_entry_dict.json"
+    _write(broken, '{"strategy": {}}')
+
+    with pytest.raises(ConfigurationError, match="Invalid seed entry in .*"):
+        seed_config.load_seed_manifest(broken)
+
+
 def test_load_seed_manifest_aggregates_directory(tmp_path: Path) -> None:
     cfg_dir = tmp_path / "configs"
     cfg_dir.mkdir()
@@ -149,6 +212,25 @@ def test_load_seed_specs_returns_enabled(tmp_path: Path) -> None:
     specs = seed_config.load_seed_specs(path)
     assert len(specs) == 1
     assert specs[0].strategy == "trend"
+
+
+def test_load_seed_manifest_rejects_missing_path(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist.json"
+
+    with pytest.raises(ConfigurationError, match="Seed path does not exist"):
+        seed_config.load_seed_manifest(missing)
+
+
+def test_load_seed_manifest_rejects_non_file_non_dir(monkeypatch, tmp_path: Path) -> None:
+    marker = tmp_path / "opaque.node"
+    _write(marker, "seed")
+
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(Path, "is_dir", lambda self: False)
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+
+    with pytest.raises(ConfigurationError, match="Seed path is not a file"):
+        seed_config.load_seed_manifest(marker)
 
 
 def test_build_seed_programs_skips_disabled_specs(monkeypatch) -> None:

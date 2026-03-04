@@ -564,6 +564,34 @@ class TestGPStrategyAdapterWarmStart:
         assert called_seed_programs == [override_seed]
 
     @patch("liq.evolution.adapters.runner_strategy.evolve")
+    def test_from_evolution_config_applies_regime_controls(self, mock_evolve) -> None:
+        from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
+        from liq.evolution.config import EvolutionConfig
+        from liq.gp.config import GPConfig
+        from liq.gp.primitives.registry import PrimitiveRegistry
+
+        mock_evolve.return_value = _make_evolution_result()
+        evolution_config = EvolutionConfig(
+            regime={
+                "regime_confidence_threshold": 0.8,
+                "regime_occupancy_threshold": 0.2,
+                "regime_hysteresis_margin": 0.11,
+                "regime_min_persistence": 4,
+            }
+        )
+        adapter = GPStrategyAdapter.from_evolution_config(
+            PrimitiveRegistry(),
+            GPConfig(population_size=20, max_depth=4, generations=2),
+            evolution_config,
+            MagicMock(),
+        )
+        adapter.fit(_make_dataframe())
+        assert adapter._regime_confidence_threshold == 0.8
+        assert adapter._regime_occupancy_threshold == 0.2
+        assert adapter._regime_hysteresis_margin == 0.11
+        assert adapter._regime_min_persistence == 4
+
+    @patch("liq.evolution.adapters.runner_strategy.evolve")
     def test_warm_start_replace_keeps_only_new_best(self, mock_evolve) -> None:
         from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
         from liq.gp.config import GPConfig

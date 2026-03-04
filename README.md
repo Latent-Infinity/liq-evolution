@@ -10,11 +10,9 @@ fitness evaluation, and strategy serialization.
 uv add liq-evolution
 ```
 
-With technical indicator support (requires [liq-ta](../liq-ta)):
-
-```bash
-uv add "liq-evolution[indicators]"
-```
+Indicator primitives are available by default through
+[liq-features](../liq-features), which uses [liq-ta](../liq-ta) as its
+calculation backend.
 
 ## Quickstart
 
@@ -113,26 +111,29 @@ print(f"Best program: {result.best_program}")
 | `enable_crossover_ops` | `bool` | `True` | Crossover detection operators |
 | `enable_temporal_ops` | `bool` | `True` | Temporal/lag operators |
 | `enable_series_sources` | `bool` | `True` | Price/volume series terminals |
-| `enable_liq_ta` | `bool` | `False` | liq-ta indicator primitives |
 
 ## Architecture
 
 ```
 liq-gp (engine)  -->  liq-evolution (domain)  -->  liq-runner (execution)
                           |
-                          +-- primitives/    Trading operators & indicators
-                          +-- fitness/       Label metrics & backtest fitness
-                          +-- program/       AST, Genome, serialization
-                          +-- adapters/      Runner strategy, signal provider
-                          +-- evolution/     Re-exports from liq-gp engine
-                          +-- config.py      Pydantic v2 configuration
+                          +-- primitives/     Trading operators + indicator wrappers
+                          |      |
+                          |      +-- liq-features  (indicator metadata + param grids)
+                          |              |
+                          |              +-- liq-ta (indicator computation backend)
+                          +-- fitness/        Label metrics & backtest fitness
+                          +-- program/        AST, Genome, serialization
+                          +-- adapters/       Runner strategy, signal provider
+                          +-- evolution/      Re-exports from liq-gp engine
+                          +-- config.py       Pydantic v2 configuration
 ```
 
 **liq-gp** provides the generic GP engine (population init, selection,
 crossover, mutation, simplification). **liq-evolution** adds trading-domain
-primitives (price series, indicators, crossover detection), multi-stage
-fitness evaluation (label-based + backtest), and adapters for the execution
-layer.
+primitives (price series, crossover detection, and indicator primitives
+registered through `liq-features`), multi-stage fitness evaluation
+(label-based + backtest), and adapters for the execution layer.
 
 ## Export / Import
 
@@ -181,7 +182,7 @@ uv run ruff format src/ tests/         # format
 uv run ty check src/                   # type check
 ```
 
-## Operational Notes (Phase 6 hardening)
+## Operational Notes (Stage 6 hardening)
 
 - **Walk-forward split failures**
   - Missing or malformed split metadata in `WalkForwardSplit` is validated before
@@ -205,3 +206,26 @@ uv run ty check src/                   # type check
     thresholds or strategy budgeting are too aggressive/lenient, coverage and
     sample quality degrade. Verify `top_k_per_level`, promotion strategy, and
     level ordering for your domain.
+
+## Stage 10 examples
+
+Runnable demonstration scripts:
+
+```bash
+python liq-evolution/examples/two_stage_evolution.py
+python liq-evolution/examples/regime_switching_demo.py
+python liq-evolution/examples/artifact_replay_demo.py
+```
+
+## Regime presets
+
+Runnable preset demos:
+
+```bash
+python liq-evolution/examples/baseline_regime_preset_demo.py
+python liq-evolution/examples/stability_first_regime_preset_demo.py
+```
+
+Documentation:
+
+- `liq-evolution/docs/regime_program_guide.md`

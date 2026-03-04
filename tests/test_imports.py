@@ -139,6 +139,7 @@ class TestPublicAPIReexports:
     def test_config_exports(self) -> None:
         from liq.evolution import (
             EvolutionConfig,
+            RegimeGateConfig,
             FitnessConfig,
             FitnessStageConfig,
             GPConfig,
@@ -150,6 +151,7 @@ class TestPublicAPIReexports:
         )
 
         assert EvolutionConfig is not None
+        assert RegimeGateConfig is not None
         assert PrimitiveConfig is not None
         assert FitnessStageConfig is not None
         assert ParallelConfig is not None
@@ -191,7 +193,7 @@ class TestPublicAPIReexports:
         assert ConfigurationError is not None
         assert ParallelExecutionError is not None
 
-    def test_phase4_genome_exports(self) -> None:
+    def test_stage4_genome_exports(self) -> None:
         from liq.evolution import (
             Genome,
             deserialize_genome,
@@ -202,12 +204,12 @@ class TestPublicAPIReexports:
         assert callable(serialize_genome)
         assert callable(deserialize_genome)
 
-    def test_phase4_feature_context_export(self) -> None:
+    def test_stage4_feature_context_export(self) -> None:
         from liq.evolution import FeatureContext
 
         assert FeatureContext is not None
 
-    def test_phase4_store_backend_export(self) -> None:
+    def test_stage4_store_backend_export(self) -> None:
         from liq.evolution import StoreBackend
 
         assert StoreBackend is not None
@@ -228,6 +230,25 @@ class TestPublicAPIReexports:
         assert callable(get_seed_template)
         assert callable(list_known_strategy_seeds)
         assert StrategySeedTemplate is not None
+
+    def test_regime_model_exports(self) -> None:
+        from liq.evolution import (
+            RegimeDetector,
+            RegimeExpert,
+            RegimeGate,
+            RegimeId,
+            RegimeModel,
+            RegimeRisk,
+            RegimeWeights,
+        )
+
+        assert RegimeDetector is not None
+        assert RegimeExpert is not None
+        assert RegimeGate is not None
+        assert RegimeRisk is not None
+        assert RegimeModel is not None
+        assert RegimeId is not None
+        assert RegimeWeights is not None
 
     def test_qd_exports(self) -> None:
         from liq.evolution import QDEvolutionResult, qd, run_qd_evolution

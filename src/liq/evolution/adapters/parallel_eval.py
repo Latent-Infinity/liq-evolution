@@ -1,6 +1,6 @@
 """Parallel batch fitness evaluation helpers.
 
-Phase-4 implementation supports real parallel dispatch via Ray with bounded
+Stage-4 implementation supports real parallel dispatch via Ray with bounded
 in-flight tasks, per-worker deterministic seeding, memory pressure detection,
 and automatic fallback to sequential evaluation.
 """

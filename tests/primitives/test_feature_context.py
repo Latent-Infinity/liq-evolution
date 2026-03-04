@@ -90,6 +90,48 @@ class TestFeatureContextCaching:
         assert r1 is not r2
         assert backend.compute.call_count == 2
 
+    def test_dict_order_does_not_affect_cache_key(self) -> None:
+        backend = _make_backend()
+        ctx = FeatureContext(backend)
+        data = _sample_data()
+
+        first = ctx.compute("sma", {"period": 14, "offset": 1}, data)
+        second = ctx.compute("sma", {"offset": 1, "period": 14}, data)
+        third = ctx.compute("sma", {"period": 20, "offset": 1}, data)
+
+        assert first is second
+        assert third is not first
+        assert backend.compute.call_count == 2
+
+    def test_list_order_does_not_affect_cache_key(self) -> None:
+        backend = _make_backend()
+        ctx = FeatureContext(backend)
+        data = _sample_data()
+
+        first = ctx.compute("sma", {"levels": [1, 2, 3]}, data)
+        second = ctx.compute("sma", {"levels": [3, 2, 1]}, data)
+        third = ctx.compute("sma", {"levels": [1, 2, 4]}, data)
+
+        assert first is second
+        assert third is not first
+        assert backend.compute.call_count == 2
+
+    def test_different_input_data_do_not_share_cache_entry(self) -> None:
+        backend = _make_backend()
+        backend.compute.side_effect = (
+            lambda name, params, data, **kw: np.asarray(data["close"], dtype=float)
+        )
+        ctx = FeatureContext(backend)
+
+        data_a = {"close": np.array([1.0, 2.0, 3.0], dtype=float)}
+        data_b = {"close": np.array([10.0, 20.0, 30.0], dtype=float)}
+
+        first = ctx.compute("sma", {"period": 14}, data_a)
+        second = ctx.compute("sma", {"period": 14}, data_b)
+
+        assert backend.compute.call_count == 2
+        assert not np.array_equal(first, second)
+
 
 class TestFeatureContextPassthrough:
     """Kwargs and delegation."""
@@ -175,3 +217,44 @@ class TestFeatureContextProtocol:
         backend = _make_backend()
         ctx = FeatureContext(backend)
         assert isinstance(ctx, IndicatorBackend)
+
+
+class TestFeatureContextHashing:
+    """Coverage for cache key normalization internals."""
+
+    def test_hashable_handles_ndarray(self) -> None:
+        arr = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+        hashed = FeatureContext._hashable(arr)
+
+        assert hashed[0] == "ndarray"
+        assert hashed[1] == arr.shape
+        assert hashed[2] == arr.dtype.str
+
+    def test_hashable_falls_back_to_repr_for_unhashable_unknown(self) -> None:
+        class Unknown:
+            __hash__ = None
+
+            def __repr__(self) -> str:
+                return "unknown-object"
+
+        hashed = FeatureContext._hashable(Unknown())
+        assert hashed == "unknown-object"
+
+    def test_hashable_handles_dict_params_order_independent(self) -> None:
+        hashable = FeatureContext._hashable({"b": [1, 2, 3], "a": {"x": 1, "y": 2}})
+        hashable_reordered = FeatureContext._hashable({"a": {"y": 2, "x": 1}, "b": [3, 2, 1]})
+
+        assert hashable == hashable_reordered
+
+    def test_hashable_handles_tuple_and_list_with_fallback(self) -> None:
+        class UnhashableTuple(tuple):
+            __hash__: object | None = None
+
+        tuple_fallback = FeatureContext._hashable(UnhashableTuple([1, {"value": 2}]))
+        list_fallback = FeatureContext._hashable([1, {"value": 2}])
+        tuple_sorted = FeatureContext._hashable(UnhashableTuple([2, 1]))
+
+        assert tuple_fallback[0] == "tuple"
+        assert len(tuple_fallback) == 2
+        assert tuple_sorted[0] == "tuple"
+        assert list_fallback[0] == "list"

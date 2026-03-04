@@ -11,6 +11,13 @@ from liq.gp.program.ast import Program
 
 ConstraintCheck = Callable[[Program, Mapping[str, Any]], Mapping[str, float] | None]
 
+_ROBUSTNESS_ROLLOUT_SCALES: dict[str, tuple[float, float] | None] = {
+    "disabled": None,
+    "canary": (0.85, 1.15),
+    "standard": (1.0, 1.0),
+    "strict": (1.10, 0.90),
+}
+
 
 def _coerce_finite_nonneg(value: Any) -> float | None:
     """Return a finite non-negative float if possible."""
@@ -54,6 +61,81 @@ def _extract_sequence_floats(values: Any, *, absolute: bool = False) -> list[flo
             continue
         output.append(abs(normalized) if absolute else normalized)
     return output
+
+
+def _resolve_metric_value(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> float | None:
+    metrics = payload.get("metrics")
+    if isinstance(metrics, Mapping):
+        for key in keys:
+            value = _coerce_finite_float(metrics.get(key))
+            if value is not None:
+                return value
+
+    for key in keys:
+        value = _coerce_finite_float(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _robustness_gate_violations(
+    payload: Mapping[str, Any],
+    *,
+    robustness_rollout: str,
+    regime_coverage_floor: float | None,
+    turnover_cap: float | None,
+    drawdown_cap: float | None,
+) -> dict[str, float]:
+    profile = _ROBUSTNESS_ROLLOUT_SCALES[robustness_rollout]
+    if profile is None:
+        return {}
+
+    coverage_scale, cap_scale = profile
+    violations: dict[str, float] = {}
+
+    if regime_coverage_floor is not None:
+        effective_floor = max(0.0, min(1.0, regime_coverage_floor * coverage_scale))
+        coverage = _resolve_metric_value(
+            payload,
+            ("regime_coverage", "regime_occupancy", "regime_confidence"),
+        )
+        if coverage is None:
+            violations["robustness:regime_coverage_missing"] = 1.0
+        elif coverage < effective_floor:
+            violations["robustness:regime_coverage_below_floor"] = (
+                effective_floor - coverage
+            )
+
+    if turnover_cap is not None:
+        effective_cap = max(0.0, turnover_cap * cap_scale)
+        turnover = _resolve_metric_value(
+            payload,
+            ("turnover", "avg_turnover"),
+        )
+        if turnover is None:
+            violations["robustness:turnover_missing"] = 1.0
+        elif turnover > effective_cap:
+            violations["robustness:turnover_above_cap"] = turnover - effective_cap
+
+    if drawdown_cap is not None:
+        effective_cap = max(0.0, drawdown_cap * cap_scale)
+        drawdown = _resolve_metric_value(
+            payload,
+            ("max_drawdown", "drawdown", "max_dd"),
+        )
+        if drawdown is None:
+            violations["robustness:drawdown_missing"] = 1.0
+        else:
+            normalized_drawdown = abs(drawdown)
+            if normalized_drawdown > effective_cap:
+                violations["robustness:max_drawdown_above_cap"] = (
+                    normalized_drawdown - effective_cap
+                )
+
+    return violations
 
 
 def constraint_no_future_reference(
@@ -154,6 +236,10 @@ class ConstraintPolicy:
 
     checks: tuple[ConstraintCheck, ...] = ()
     enable_default_checks: bool = False
+    robustness_rollout: str = "disabled"
+    regime_coverage_floor: float | None = None
+    turnover_cap: float | None = None
+    drawdown_cap: float | None = None
 
     def __post_init__(self) -> None:
         if self.enable_default_checks and not self.checks:
@@ -166,6 +252,25 @@ class ConstraintPolicy:
                     constraint_max_leverage,
                 ),
             )
+        if self.robustness_rollout not in _ROBUSTNESS_ROLLOUT_SCALES:
+            raise ValueError(
+                "robustness_rollout must be one of "
+                + ", ".join(sorted(_ROBUSTNESS_ROLLOUT_SCALES))
+            )
+        for name, value in (
+            ("regime_coverage_floor", self.regime_coverage_floor),
+            ("turnover_cap", self.turnover_cap),
+            ("drawdown_cap", self.drawdown_cap),
+        ):
+            if value is None:
+                continue
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be numeric when provided")
+            value = float(value)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+            if name == "regime_coverage_floor" and value > 1.0:
+                raise ValueError("regime_coverage_floor must be in [0, 1]")
 
     def evaluate(
         self,
@@ -184,5 +289,17 @@ class ConstraintPolicy:
                 if penalty is None:
                     continue
                 violations[key] = max(violations.get(key, 0.0), penalty)
+
+        for key, value in _robustness_gate_violations(
+            payload,
+            robustness_rollout=self.robustness_rollout,
+            regime_coverage_floor=self.regime_coverage_floor,
+            turnover_cap=self.turnover_cap,
+            drawdown_cap=self.drawdown_cap,
+        ).items():
+            penalty = _coerce_finite_nonneg(value)
+            if penalty is None:
+                continue
+            violations[key] = max(violations.get(key, 0.0), penalty)
 
         return violations

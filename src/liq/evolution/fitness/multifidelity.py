@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import warnings
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -102,7 +101,6 @@ class MultiFidelityFitnessEvaluator:
         else:
             self._level_costs = tuple(float(i + 1) for i in range(len(self._levels)))
 
-        self._warned_incomplete_objectives = False
         self._fingerprint_cache: str | None = None
 
     @property
@@ -459,12 +457,6 @@ class MultiFidelityFitnessEvaluator:
     ) -> tuple[float, float, int]:
         if len(self._objective_directions) <= objective_idx:
             direction = "maximize"
-            if not self._warned_incomplete_objectives:
-                warnings.warn(
-                    "objective_directions shorter than objective index; defaulting to maximize",
-                    stacklevel=2,
-                )
-                self._warned_incomplete_objectives = True
         else:
             direction = self._objective_directions[objective_idx]
 
@@ -477,13 +469,6 @@ class MultiFidelityFitnessEvaluator:
 
     def _objective_value(self, result: FitnessResult, idx: int) -> float:
         if idx >= len(result.objectives):
-            if not self._warned_incomplete_objectives:
-                warnings.warn(
-                    "fitness result has fewer objectives than expected;"
-                    " treating missing objectives as NaN",
-                    stacklevel=2,
-                )
-                self._warned_incomplete_objectives = True
             return float("nan")
 
         value = result.objectives[idx]

@@ -11,7 +11,7 @@ import numpy as np
 import polars as pl
 
 from liq.evolution.adapters.parallel_eval import Evaluator, ParallelEvaluator
-from liq.evolution.adapters.signal_output import GPSignalOutput
+from liq.evolution.adapters.signal_output import GPSignalOutput, RegimeState
 from liq.evolution.config import EvolutionConfig, ParallelConfig
 from liq.evolution.errors import AdapterError, SerializationError
 from liq.gp.config import GPConfig as LiqGPConfig
@@ -30,6 +30,18 @@ if TYPE_CHECKING:
 def _dataframe_to_context(df: pl.DataFrame) -> dict[str, np.ndarray]:
     """Convert a polars DataFrame to a GP evaluation context dict."""
     return {col: df[col].to_numpy() for col in df.columns}
+
+
+def _score_turnover(scores: np.ndarray) -> float:
+    """Compute directional flip ratio (ignoring flat/zero spans)."""
+    if scores.size <= 1:
+        return 0.0
+    signs = np.sign(scores)
+    non_zero_signs = signs[signs != 0]
+    if non_zero_signs.size <= 1:
+        return 0.0
+    changes = np.count_nonzero(non_zero_signs[1:] != non_zero_signs[:-1])
+    return float(changes / (non_zero_signs.size - 1))
 
 
 class GPStrategyAdapter:
@@ -56,7 +68,20 @@ class GPStrategyAdapter:
         warm_start_mode: Literal["replace", "augment"] = "replace",
         seed_programs_path: str | Path | None = None,
         parallel_config: ParallelConfig | None = None,
+        regime_confidence_threshold: float = 0.55,
+        regime_occupancy_threshold: float = 0.10,
+        regime_hysteresis_margin: float = 0.05,
+        regime_min_persistence: int = 2,
     ) -> None:
+        if not 0.0 <= regime_confidence_threshold <= 1.0:
+            raise ValueError("regime_confidence_threshold must be in [0, 1]")
+        if not 0.0 <= regime_occupancy_threshold <= 1.0:
+            raise ValueError("regime_occupancy_threshold must be in [0, 1]")
+        if regime_hysteresis_margin < 0.0:
+            raise ValueError("regime_hysteresis_margin must be >= 0")
+        if regime_min_persistence < 1:
+            raise ValueError("regime_min_persistence must be >= 1")
+
         self._registry = registry
         self._gp_config = gp_config
         self._evaluator = evaluator
@@ -71,8 +96,15 @@ class GPStrategyAdapter:
         self._warm_start = warm_start
         self._warm_start_mode = warm_start_mode
         self._parallel_config = parallel_config
+        self._regime_confidence_threshold = float(regime_confidence_threshold)
+        self._regime_occupancy_threshold = float(regime_occupancy_threshold)
+        self._regime_hysteresis_margin = float(regime_hysteresis_margin)
+        self._regime_min_persistence = int(regime_min_persistence)
         self._program: Program | None = None
         self._evolution_result: EvolutionResult | None = None
+        self._active_regime_direction: int = 0
+        self._pending_regime_direction: int = 0
+        self._pending_regime_count: int = 0
 
         # Validate seeds at construction (fail-fast)
         if self._seed_programs is not None:
@@ -153,10 +185,173 @@ class GPStrategyAdapter:
         """
         if self._program is None:
             raise AdapterError("predict() called before fit()")
+        if features.height == 0:
+            regime_state = RegimeState(
+                label="empty",
+                confidence=0.0,
+                occupancy=0.0,
+                reason_code="empty_features",
+                turnover=0.0,
+            )
+            return GPSignalOutput(
+                scores=pl.Series("scores", np.asarray([], dtype=np.float64)),
+                metadata={
+                    "regime_reason_code": regime_state.reason_code,
+                    "regime_label": regime_state.label,
+                },
+                regime_state=regime_state,
+            )
 
         context = _dataframe_to_context(features)
-        scores_array = gp_evaluate(self._program, context)
-        return GPSignalOutput(scores=pl.Series("scores", scores_array))
+        raw_scores = np.asarray(gp_evaluate(self._program, context), dtype=np.float64)
+        gated_scores, regime_state = self._apply_regime_gating(raw_scores, features)
+        return GPSignalOutput(
+            scores=pl.Series("scores", gated_scores),
+            metadata={
+                "regime_reason_code": regime_state.reason_code,
+                "regime_label": regime_state.label,
+                "regime_confidence": regime_state.confidence,
+                "regime_occupancy": regime_state.occupancy,
+                "regime_turnover": regime_state.turnover,
+            },
+            regime_state=regime_state,
+        )
+
+    def _apply_regime_gating(
+        self,
+        raw_scores: np.ndarray,
+        features: pl.DataFrame,
+    ) -> tuple[np.ndarray, RegimeState]:
+        if raw_scores.size == 0:
+            return raw_scores, RegimeState(
+                label="empty",
+                confidence=0.0,
+                occupancy=0.0,
+                reason_code="empty_scores",
+                turnover=0.0,
+            )
+        if raw_scores.shape[0] != features.height:
+            return raw_scores, RegimeState(
+                label="fallback",
+                confidence=0.0,
+                occupancy=0.0,
+                reason_code="score_length_mismatch",
+                turnover=_score_turnover(raw_scores),
+            )
+        if not np.all(np.isfinite(raw_scores)):
+            sanitized = np.nan_to_num(raw_scores, nan=0.0, posinf=0.0, neginf=0.0)
+            return sanitized, RegimeState(
+                label="fallback",
+                confidence=0.0,
+                occupancy=0.0,
+                reason_code="non_finite_scores",
+                turnover=_score_turnover(sanitized),
+            )
+
+        used_confidence_fallback = "regime_confidence" not in features.columns
+        used_occupancy_fallback = "regime_occupancy" not in features.columns
+        if used_confidence_fallback:
+            confidence = np.clip(np.abs(raw_scores), 0.0, 1.0)
+        else:
+            confidence = np.asarray(
+                features["regime_confidence"].to_numpy(),
+                dtype=np.float64,
+            )
+            confidence = np.clip(confidence, 0.0, 1.0)
+
+        if used_occupancy_fallback:
+            occupancy = np.ones(raw_scores.shape[0], dtype=np.float64)
+        else:
+            occupancy = np.asarray(
+                features["regime_occupancy"].to_numpy(),
+                dtype=np.float64,
+            )
+            occupancy = np.clip(occupancy, 0.0, 1.0)
+
+        if (
+            confidence.shape != raw_scores.shape
+            or occupancy.shape != raw_scores.shape
+            or not np.all(np.isfinite(confidence))
+            or not np.all(np.isfinite(occupancy))
+        ):
+            return raw_scores, RegimeState(
+                label="fallback",
+                confidence=0.0,
+                occupancy=0.0,
+                reason_code="invalid_regime_inputs",
+                turnover=_score_turnover(raw_scores),
+            )
+
+        gated = np.zeros_like(raw_scores)
+        active = self._active_regime_direction
+        pending_direction = self._pending_regime_direction
+        pending_count = self._pending_regime_count
+
+        for idx, raw in enumerate(raw_scores):
+            if confidence[idx] < self._regime_confidence_threshold:
+                continue
+            if occupancy[idx] < self._regime_occupancy_threshold:
+                continue
+
+            direction = int(np.sign(raw))
+            if direction == 0:
+                continue
+
+            if active == 0 or direction == active:
+                active = direction
+                pending_direction = 0
+                pending_count = 0
+                gated[idx] = raw
+                continue
+
+            if abs(raw) < self._regime_hysteresis_margin:
+                continue
+
+            if direction == pending_direction:
+                pending_count += 1
+            else:
+                pending_direction = direction
+                pending_count = 1
+
+            if pending_count >= self._regime_min_persistence:
+                active = direction
+                pending_direction = 0
+                pending_count = 0
+                gated[idx] = raw
+
+        self._active_regime_direction = active
+        self._pending_regime_direction = pending_direction
+        self._pending_regime_count = pending_count
+
+        mean_confidence = float(np.mean(confidence))
+        mean_occupancy = float(np.mean(occupancy))
+        turnover = _score_turnover(gated)
+        if np.all(gated == 0):
+            return gated, RegimeState(
+                label="no_trade",
+                confidence=mean_confidence,
+                occupancy=mean_occupancy,
+                reason_code="threshold_gate",
+                turnover=turnover,
+            )
+
+        reason_code = (
+            "regime_features_missing"
+            if (used_confidence_fallback or used_occupancy_fallback)
+            else "ok"
+        )
+        label = "neutral"
+        if active > 0:
+            label = "trend"
+        elif active < 0:
+            label = "range"
+        return gated, RegimeState(
+            label=label,
+            confidence=mean_confidence,
+            occupancy=mean_occupancy,
+            reason_code=reason_code,
+            turnover=turnover,
+        )
 
     # -------------------------------------------------------------- #
     #  Properties
@@ -275,6 +470,10 @@ class GPStrategyAdapter:
             warm_start_mode=warm_start_config.mode,
             seed_programs_path=warm_start_config.seed_programs_path,
             parallel_config=parallel_config,
+            regime_confidence_threshold=evolution_config.regime.regime_confidence_threshold,
+            regime_occupancy_threshold=evolution_config.regime.regime_occupancy_threshold,
+            regime_hysteresis_margin=evolution_config.regime.regime_hysteresis_margin,
+            regime_min_persistence=evolution_config.regime.regime_min_persistence,
         )
 
 

@@ -24,7 +24,7 @@ class _LargePayloadEvaluator:
             {
                 "program": int(program),
                 "trace": base_payload,
-                "metadata": {"phase": "stress", "payload_len": self.payload_size},
+                "metadata": {"stage": "stress", "payload_len": self.payload_size},
             }
             for program in programs
         ]
@@ -55,7 +55,7 @@ def test_parallel_evaluate_keeps_context_schema_for_large_input() -> None:
 
     assert len(results) == 16
     assert all(result["metadata"]["payload_len"] == 10_000 for result in results)
-    assert all(result["metadata"]["phase"] == "stress" for result in results)
+    assert all(result["metadata"]["stage"] == "stress" for result in results)
 
 
 def test_no_unbounded_memory_growth_over_repeated_evaluations() -> None:

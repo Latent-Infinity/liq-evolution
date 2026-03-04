@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from liq.evolution.config import FitnessStageConfig
+from liq.evolution.config import EvolutionRunConfig, FitnessStageConfig
 from liq.evolution.fitness.label_metrics import LabelFitnessEvaluator
 from liq.evolution.fitness.runner_backtest import BacktestFitnessEvaluator
 from liq.evolution.fitness.two_stage import TwoStageFitnessEvaluator
@@ -15,6 +15,7 @@ def wire_objectives(
     config: FitnessStageConfig,
     *,
     backtest_fn: Callable[[Any], Sequence[dict[str, Any]]] | None = None,
+    run_config: EvolutionRunConfig | None = None,
 ) -> LabelFitnessEvaluator | TwoStageFitnessEvaluator:
     """Wire up objective functions based on fitness stage configuration.
 
@@ -53,4 +54,13 @@ def wire_objectives(
         stage_a=stage_a,
         stage_b=stage_b,
         top_k=config.backtest_top_n,
+        stage_b_candidate_budget=(
+            run_config.stage_b_candidate_budget if run_config is not None else None
+        ),
+        stage_b_min_candidates=(
+            run_config.stage_b_min_candidates if run_config is not None else 1
+        ),
+        stage_a_threshold=(
+            run_config.stage_a_threshold if run_config is not None else None
+        ),
     )

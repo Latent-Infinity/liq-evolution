@@ -11,6 +11,7 @@ import pytest
 from liq.evolution.config import PrimitiveConfig
 from liq.evolution.errors import PrimitiveSetupError
 from liq.evolution.primitives.registry import build_trading_registry
+from liq.gp.errors import PrimitiveError
 from liq.gp.primitives.registry import PrimitiveRegistry
 
 
@@ -26,12 +27,12 @@ class TestBuildTradingRegistry:
         assert len(reg.list_primitives(category="logic")) == 4
         assert len(reg.list_primitives(category="crossover")) == 4
         assert len(reg.list_primitives(category="temporal")) == 10
-        assert len(reg.list_primitives(category="terminal")) == 13
+        assert len(reg.list_primitives(category="terminal")) == 14
 
     def test_total_primitive_count_default(self) -> None:
         reg = build_trading_registry(PrimitiveConfig())
         total = len(reg.list_primitives())
-        assert total == 49  # 13+6+4+4+10+12
+        assert total > 100
 
     def test_disable_numeric(self) -> None:
         cfg = PrimitiveConfig(enable_numeric_ops=False)
@@ -63,10 +64,6 @@ class TestBuildTradingRegistry:
         reg = build_trading_registry(cfg)
         assert len(reg.list_primitives(category="terminal")) == 0
 
-    def test_liq_ta_disabled_by_default(self) -> None:
-        cfg = PrimitiveConfig()
-        assert cfg.enable_liq_ta is False
-
     def test_disable_all(self) -> None:
         cfg = PrimitiveConfig(
             enable_numeric_ops=False,
@@ -77,11 +74,11 @@ class TestBuildTradingRegistry:
             enable_series_sources=False,
         )
         reg = build_trading_registry(cfg)
-        assert len(reg.list_primitives()) == 0
+        assert len(reg.list_primitives()) > 100
 
 
-class TestBuildTradingRegistryLiqTA:
-    """Test the liq-ta branch in build_trading_registry."""
+class TestBuildTradingRegistryIndicators:
+    """Test indicator-backed registry behavior."""
 
     class _CountingBackend:
         def __init__(self, wrapped: Any) -> None:
@@ -101,37 +98,54 @@ class TestBuildTradingRegistryLiqTA:
             return self.wrapped.list_indicators(category)
 
     @pytest.fixture
-    def liq_ta_backend(self):
-        liq_ta = pytest.importorskip("liq_ta")  # noqa: F841
-        from liq.evolution.primitives.indicators_liq_ta import LiqTAIndicatorBackend
+    def liq_features_backend(self):
+        from liq.evolution.primitives.indicators_liq_ta import LiqFeaturesBackend
 
-        return LiqTAIndicatorBackend()
+        return LiqFeaturesBackend()
 
-    def test_enable_liq_ta_registers_indicators(self, liq_ta_backend) -> None:
-        cfg = PrimitiveConfig(enable_liq_ta=True)
-        reg = build_trading_registry(cfg, backend=liq_ta_backend)
-        indicators = reg.list_primitives(category="indicator")
-        assert len(indicators) > 100
+    def test_default_build_registers_indicators(self, liq_features_backend) -> None:
+        reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
+        indicator_names = [
+            name for name, primitive in reg._primitives.items() if primitive.category == "indicator"
+        ]
+        assert len(indicator_names) > 100
+        assert reg.get("rsi") is not None
+        with pytest.raises(PrimitiveError):
+            reg.get("ta_rsi")
+        assert reg.get("sma") is not None
 
-    def test_enable_liq_ta_without_backend_no_indicators(self) -> None:
-        cfg = PrimitiveConfig(enable_liq_ta=True)
-        reg = build_trading_registry(cfg, backend=None)
-        indicators = reg.list_primitives(category="indicator")
-        assert len(indicators) == 0
+    def test_default_build_registers_indicators_without_explicit_backend(self) -> None:
+        reg = build_trading_registry(PrimitiveConfig())
+        indicator_names = [
+            name for name, primitive in reg._primitives.items() if primitive.category == "indicator"
+        ]
+        assert len(indicator_names) > 100
+        assert reg.get("rsi") is not None
+        assert reg.get("sma") is not None
 
-    def test_enable_liq_ta_preserves_other_categories(self, liq_ta_backend) -> None:
-        cfg = PrimitiveConfig(enable_liq_ta=True)
-        reg = build_trading_registry(cfg, backend=liq_ta_backend)
-        # Standard categories still present
+    def test_default_build_uses_canonical_indicator_names(
+        self,
+        liq_features_backend,
+    ) -> None:
+        reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
+        assert reg.get("rsi") is not None
+        assert reg.get("macd_signal") is not None
+        with pytest.raises(PrimitiveError):
+            reg.get("ta_rsi")
+        with pytest.raises(PrimitiveError):
+            reg.get("ta_macd_signal")
+
+    def test_default_build_preserves_other_categories(self, liq_features_backend) -> None:
+        reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
+        # Standard categories still present when not explicitly disabled.
         assert len(reg.list_primitives(category="numeric")) == 12
         assert len(reg.list_primitives(category="temporal")) == 10
 
-    def test_enable_liq_ta_uses_feature_context_caching(self, liq_ta_backend) -> None:
-        cfg = PrimitiveConfig(enable_liq_ta=True)
-        counting = self._CountingBackend(liq_ta_backend)
+    def test_indicator_cache_uses_feature_context(self, liq_features_backend) -> None:
+        counting = self._CountingBackend(liq_features_backend)
 
-        reg = build_trading_registry(cfg, backend=counting)
-        sma = reg.get("ta_sma")
+        reg = build_trading_registry(PrimitiveConfig(), backend=counting)
+        sma = reg.get("sma")
 
         close = np.arange(1.0, 31.0)
         r1 = sma.callable(close, period=14)
@@ -140,12 +154,11 @@ class TestBuildTradingRegistryLiqTA:
         assert r1 is r2
         assert counting.calls == 1
 
-    def test_enable_liq_ta_cache_varies_by_params(self, liq_ta_backend) -> None:
-        cfg = PrimitiveConfig(enable_liq_ta=True)
-        counting = self._CountingBackend(liq_ta_backend)
+    def test_indicator_cache_varies_by_params(self, liq_features_backend) -> None:
+        counting = self._CountingBackend(liq_features_backend)
 
-        reg = build_trading_registry(cfg, backend=counting)
-        sma = reg.get("ta_sma")
+        reg = build_trading_registry(PrimitiveConfig(), backend=counting)
+        sma = reg.get("sma")
 
         close = np.arange(1.0, 31.0)
         _ = sma.callable(close, period=14)
@@ -166,3 +179,11 @@ class TestBuildTradingRegistryErrorHandling:
             pytest.raises(PrimitiveSetupError, match="boom"),
         ):
             build_trading_registry(PrimitiveConfig())
+
+
+def test_public_imports_do_not_expose_legacy_liq_ta_symbols() -> None:
+    with pytest.raises(ImportError):
+        from liq.evolution import LiqTAIndicatorBackend  # noqa: F401
+
+    with pytest.raises(ImportError):
+        from liq.evolution import register_liq_ta_indicators  # noqa: F401

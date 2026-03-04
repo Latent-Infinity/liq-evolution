@@ -1,4 +1,4 @@
-"""Tests for ParallelEvaluator ray backend (Phase 4, Step 6).
+"""Tests for ParallelEvaluator ray backend (Stage 4, Step 6).
 
 All tests use mocked ray -- no real ray import is required.
 """

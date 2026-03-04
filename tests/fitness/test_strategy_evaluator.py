@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -198,6 +199,40 @@ class _FoldSliceOverrideRunner:
             "validate": payload,
             "test": payload,
         }
+
+
+class TestStrategyEvaluatorLoggingContracts:
+    """Strategy evaluator emits structured logs for each candidate and split."""
+
+    def test_evaluate_logs_run_id_and_candidate_split_progress(self, caplog) -> None:
+        evaluator = StrategyEvaluator(
+            backtest_runner=_SplitterRunner(),
+            splits=_make_split_set(),
+            objectives=("cagr",),
+            objective_directions=("maximize",),
+            split_weights={"train": 1.0, "validate": 1.0, "test": 0.0},
+            behavior_descriptor_names=(BEHAVIOR_DESCRIPTOR_TURNOVER,),
+        )
+
+        with caplog.at_level(logging.INFO, logger="liq.evolution.fitness.strategy_evaluator"):
+            evaluator.evaluate(
+                [_make_program()],
+                context={"run_id": "run-strategy", "labels": np.zeros(100)},
+            )
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "strategy_evaluator split_evaluated run_id=run-strategy" in message
+            for message in messages
+        )
+        assert any(
+            "candidate_hash=" in message and "strategy_evaluator candidate_complete" in message
+            for message in messages
+        )
+        assert any(
+            "strategy_evaluator batch_complete run_id=run-strategy" in message
+            for message in messages
+        )
 
 
 class TestStrategyEvaluator:

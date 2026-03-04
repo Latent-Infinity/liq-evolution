@@ -20,7 +20,7 @@ class LiqEvolutionError(Exception):
 
 
 class EvolutionError(LiqEvolutionError):
-    """General domain error used by phase-0 documentation contract."""
+    """General domain error used by stage-0 documentation contract."""
 
 
 class PrimitiveError(EvolutionError):
@@ -81,6 +81,26 @@ class FitnessEvaluationError(FitnessError):
     - Backtest fitness evaluation raises an unrecoverable error.
     - An objective function produces only NaN or infinite values.
     """
+
+
+class CandidateArtifactError(EvolutionError):
+    """Raised when a candidate artifact is missing required contract fields."""
+
+
+class StrategyArtifactError(EvolutionError):
+    """Raised when a strategy artifact cannot be decoded or validated."""
+
+
+class EvaluationContractError(EvolutionError):
+    """Raised when protocol contracts fail across stage boundaries."""
+
+
+class DeterminismViolationError(EvolutionError):
+    """Raised when reproducibility contracts are violated."""
+
+
+class ProtocolVersionError(EvolutionError):
+    """Raised when protocol versions are incompatible."""
 
 
 class AdapterError(EvolutionError):

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from liq.evolution.errors import ConfigurationError
 from liq.evolution.program import FunctionNode
+from liq.evolution.config import PrimitiveConfig
+from liq.evolution.primitives.registry import build_trading_registry
+from liq.evolution.primitives.series_sources import prepare_evaluation_context
 from liq.evolution.seeds import (
     StrategySeedTemplate,
     build_strategy_seed,
@@ -15,6 +19,7 @@ from liq.evolution.seeds import (
 )
 from liq.gp.primitives.registry import PrimitiveRegistry
 from liq.gp.types import BoolSeries, Series
+from liq.gp.program.eval import evaluate as evaluate_program
 
 
 def _seed_registry() -> PrimitiveRegistry:
@@ -543,6 +548,8 @@ class TestStrategySeedRegistry:
             "cdl_evening_star_bearish",
             "regime_switching_trend_mean_reversion",
             "regime_switching_momentum_volatility",
+            "carry_spread_expansion",
+            "carry_spread_contraction",
         }
 
     def test_get_unknown_seed_raises_key_error(self) -> None:
@@ -560,7 +567,164 @@ class TestStrategySeedRegistry:
     def test_get_template_metadata(self) -> None:
         template = get_seed_template("ema_crossover")
         assert isinstance(template, StrategySeedTemplate)
-        assert template.name == "ema_crossover"
+        assert template.block_role.value == "expert"
+        assert template.arity == len(template.expected_inputs)
+        assert template.regime_hints
+        assert template.turnover_expectation is None
+        assert template.failure_modes
+
+    def test_seed_behaviour_rsi_oversold_fires_when_oversold(self) -> None:
+        registry = build_trading_registry(PrimitiveConfig())
+        template = get_seed_template("rsi_oversold")
+        program = template.builder(registry)
+
+        close = np.linspace(120.0, 40.0, 120)
+        context = prepare_evaluation_context(
+            {
+                "open": close + 0.25,
+                "high": close + 0.5,
+                "low": close - 0.5,
+                "close": close,
+                "volume": np.ones_like(close),
+            }
+        )
+        out = evaluate_program(program, context)
+        valid = out[20:][~np.isnan(out[20:])]
+
+        assert valid.size > 0
+        assert np.any(valid > 0.5)
+        assert template.name == "rsi_oversold"
+
+    def test_carry_spread_accepts_single_input_atr(self) -> None:
+        registry = PrimitiveRegistry()
+
+        def _passthrough(value, /, **_params):
+            return value
+
+        def _gt(lhs, rhs, /, **_params):
+            return lhs > rhs
+
+        registry.register(
+            "atr",
+            _passthrough,
+            category="ta",
+            input_types=(Series,),
+            output_type=Series,
+            arity=1,
+        )
+        registry.register(
+            "ta_sma",
+            _passthrough,
+            category="ta",
+            input_types=(Series,),
+            output_type=Series,
+            arity=1,
+        )
+        registry.register(
+            "gt",
+            _gt,
+            category="comparison",
+            input_types=(Series, Series),
+            output_type=BoolSeries,
+            arity=2,
+        )
+
+        template = get_seed_template("carry_spread_expansion")
+        program = template.builder(
+            registry,
+            spread_period=4,
+            spread_smooth_period=10,
+        )
+
+        spread = program.children[0]
+        assert spread.primitive.name == "atr"  # type: ignore[attr-defined]
+        assert len(spread.children) == 1  # type: ignore[attr-defined]
+        assert spread.children[0].name == "close"  # type: ignore[attr-defined]
+
+    def test_carry_spread_rejects_unsupported_atr_arity(self) -> None:
+        registry = PrimitiveRegistry()
+
+        def _passthrough(value, /, **_params):
+            return value
+
+        def _gt(lhs, rhs, /, **_params):
+            return lhs > rhs
+
+        registry.register(
+            "atr",
+            _passthrough,
+            category="ta",
+            input_types=(Series, Series),
+            output_type=Series,
+            arity=2,
+        )
+        registry.register(
+            "ta_sma",
+            _passthrough,
+            category="ta",
+            input_types=(Series,),
+            output_type=Series,
+            arity=1,
+        )
+        registry.register(
+            "gt",
+            _gt,
+            category="comparison",
+            input_types=(Series, Series),
+            output_type=BoolSeries,
+            arity=2,
+        )
+
+        template = get_seed_template("carry_spread_expansion")
+        with pytest.raises(ValueError, match="requires ATR arity 1 or 3"):
+            template.builder(
+                registry,
+                spread_period=4,
+                spread_smooth_period=10,
+            )
+
+    @pytest.mark.parametrize(
+        ("seed_name", "spread_pattern"),
+        [
+            ("carry_spread_expansion", "expansion"),
+            ("carry_spread_contraction", "contraction"),
+        ],
+    )
+    def test_seed_behaviour_carry_spread_signals_expected_on_synthetic_data(
+        self,
+        seed_name: str,
+        spread_pattern: str,
+    ) -> None:
+        registry = build_trading_registry(PrimitiveConfig())
+        template = get_seed_template(seed_name)
+        program = template.builder(
+            registry,
+            spread_period=4,
+            spread_smooth_period=10,
+        )
+
+        n = 180
+        close = np.full(n, 100.0)
+        volume = np.ones(n)
+        if spread_pattern == "expansion":
+            spread = np.where(np.arange(n) < n // 2, 0.25, 2.5)
+        else:
+            spread = np.where(np.arange(n) < n // 2, 2.5, 0.25)
+
+        sample = prepare_evaluation_context(
+            {
+                "open": close,
+                "high": close + spread,
+                "low": close - spread,
+                "close": close,
+                "volume": volume,
+            }
+        )
+        out = evaluate_program(program, sample)
+        finite = out[~np.isnan(out)]
+
+        assert finite.size > 10
+        assert np.any(finite > 0.5)
 
 
 class TestStrategySeedBuilders:
@@ -637,6 +801,8 @@ class TestStrategySeedBuilders:
             "cdl_evening_star_bearish",
             "regime_switching_trend_mean_reversion",
             "regime_switching_momentum_volatility",
+            "carry_spread_expansion",
+            "carry_spread_contraction",
         ],
     )
     def test_build_strategy_seed_dispatch(self, seed_name: str) -> None:
@@ -953,6 +1119,36 @@ class TestStrategySeedBuilders:
                 "regime_switching_momentum_volatility",
                 {"fast_std_period": 40, "slow_std_period": 20},
                 "fast_period must be smaller than slow_period",
+            ),
+            (
+                "carry_spread_expansion",
+                {"spread_period": 0},
+                "spread period must be positive",
+            ),
+            (
+                "carry_spread_expansion",
+                {"spread_smooth_period": 0},
+                "spread_smooth_period must be positive",
+            ),
+            (
+                "carry_spread_expansion",
+                {"spread_period": 20, "spread_smooth_period": 20},
+                "spread_smooth_period must be larger than spread_period",
+            ),
+            (
+                "carry_spread_contraction",
+                {"spread_period": 0},
+                "spread period must be positive",
+            ),
+            (
+                "carry_spread_contraction",
+                {"spread_smooth_period": 0},
+                "spread_smooth_period must be positive",
+            ),
+            (
+                "carry_spread_contraction",
+                {"spread_period": 20, "spread_smooth_period": 20},
+                "spread_smooth_period must be larger than spread_period",
             ),
         ],
     )

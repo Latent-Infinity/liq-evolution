@@ -73,7 +73,6 @@ def _small_gp_config(*, seed: int = 17) -> LiqGPConfig:
         tournament_size=2,
         elitism_count=1,
         constant_opt_enabled=False,
-        semantic_dedup_enabled=False,
         simplification_enabled=False,
     )
 
@@ -82,7 +81,7 @@ class TestRunQDEvolution:
     """Execute a tiny QD evolution loop and verify archive/portfolio output."""
 
     def test_run_qd_evolution_returns_portfolio_and_coverage(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config()
         context = prepare_evaluation_context(
             {
@@ -112,7 +111,7 @@ class TestRunQDEvolution:
         assert result.behavior_descriptor_names == (BEHAVIOR_DESCRIPTOR_TURNOVER,)
 
     def test_run_qd_evolution_invalid_coverage_weight(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config(seed=42)
         context = prepare_evaluation_context(
             {
@@ -135,7 +134,7 @@ class TestRunQDEvolution:
             )
 
     def test_run_qd_evolution_invalid_coverage_interval(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config()
         context = prepare_evaluation_context(
             {
@@ -156,7 +155,7 @@ class TestRunQDEvolution:
             )
 
     def test_run_qd_evolution_invalid_portfolio_size(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config(seed=2)
         context = prepare_evaluation_context(
             {
@@ -177,7 +176,7 @@ class TestRunQDEvolution:
             )
 
     def test_run_qd_evolution_requires_descriptor_names(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config(seed=3)
         context = prepare_evaluation_context(
             {
@@ -200,7 +199,7 @@ class TestRunQDEvolution:
             )
 
     def test_run_qd_evolution_rejects_descriptor_count_mismatch(self) -> None:
-        registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+        registry = build_trading_registry(PrimitiveConfig())
         config = _small_gp_config(seed=4)
         context = prepare_evaluation_context(
             {
@@ -242,7 +241,7 @@ class _ArchiveStub:
 
 
 def test_run_qd_evolution_falls_back_to_pareto_front_when_archive_empty() -> None:
-    registry = build_trading_registry(PrimitiveConfig(enable_liq_ta=False))
+    registry = build_trading_registry(PrimitiveConfig())
     config = _small_gp_config(seed=5)
     context = prepare_evaluation_context(
         {

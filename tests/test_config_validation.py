@@ -1,4 +1,4 @@
-"""Tests for Phase 4 configuration validation hardening."""
+"""Tests for Stage 4 configuration validation hardening."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from liq.evolution.errors import ConfigurationError
 
 
 class TestParallelConfigNewFields:
-    """Verify new Phase 4 ParallelConfig fields and defaults."""
+    """Verify new Stage 4 ParallelConfig fields and defaults."""
 
     def test_max_in_flight_default(self) -> None:
         config = ParallelConfig()

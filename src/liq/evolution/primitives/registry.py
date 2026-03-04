@@ -32,7 +32,7 @@ def build_trading_registry(
     Args:
         config: Primitive configuration controlling which categories
             to register.
-        backend: Optional indicator backend for liq-ta primitives.
+        backend: Optional indicator backend for indicator primitives.
 
     Returns:
         A populated ``PrimitiveRegistry``.
@@ -55,18 +55,22 @@ def build_trading_registry(
             register_crossover_ops(registry)
         if config.enable_temporal_ops:
             register_temporal_ops(registry)
-        if config.enable_liq_ta and backend is not None:
-            from liq.evolution.primitives.indicators_liq_ta import (
-                register_liq_ta_indicators,
-            )
+        if backend is None:
+            from liq.evolution.primitives.indicators_liq_ta import LiqFeaturesBackend
 
-            # Enable in-memory caching by default for indicator computations.
-            # Avoid double-wrapping when callers already provide a cache wrapper.
-            cached_backend = backend
-            if not isinstance(backend, FeatureContext):
-                cached_backend = FeatureContext(backend)
+            backend = LiqFeaturesBackend()
 
-            register_liq_ta_indicators(registry, cached_backend)
+        from liq.evolution.primitives.indicators_liq_ta import (
+            register_liq_ta_indicators,
+        )
+
+        # Enable in-memory caching by default for indicator computations.
+        # Avoid double-wrapping when callers already provide a cache wrapper.
+        cached_backend = backend
+        if not isinstance(cached_backend, FeatureContext):
+            cached_backend = FeatureContext(cached_backend)
+
+        register_liq_ta_indicators(registry, cached_backend)
 
         return registry
     except Exception as exc:

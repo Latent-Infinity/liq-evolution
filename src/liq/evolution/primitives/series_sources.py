@@ -19,6 +19,7 @@ _TERMINAL_NAMES = [
     "log_returns",
     "midrange",
     "typical_price",
+    "range",
     "ha_open",
     "ha_high",
     "ha_low",
@@ -98,6 +99,7 @@ def prepare_evaluation_context(
     # Midrange and typical price
     ctx["midrange"] = (high + low) / 2.0
     ctx["typical_price"] = (high + low + close) / 3.0
+    ctx["range"] = high - low
 
     # Heiken Ashi
     ha_close = (open_ + high + low + close) / 4.0

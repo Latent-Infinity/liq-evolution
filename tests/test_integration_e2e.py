@@ -1,4 +1,4 @@
-"""End-to-end integration tests for Phase 3: adapter + fitness pipeline."""
+"""End-to-end integration tests for Stage 3: adapter + fitness pipeline."""
 
 from __future__ import annotations
 
@@ -29,13 +29,12 @@ from liq.gp.types import EvolutionResult, Series
 def _small_gp_config(*, seed: int = 42) -> LiqGPConfig:
     return LiqGPConfig(
         population_size=20,
-        max_depth=4,
+        max_depth=6,
         generations=3,
         seed=seed,
         tournament_size=3,
         elitism_count=2,
         constant_opt_enabled=False,
-        semantic_dedup_enabled=False,
         simplification_enabled=False,
     )
 
@@ -97,7 +96,7 @@ class TestAdapterFitPredictE2E:
 
     def test_fit_predict_roundtrip(self) -> None:
         """fit() runs real evolution, predict() returns GPSignalOutput."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         gp_config = _small_gp_config()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -119,7 +118,7 @@ class TestAdapterFitPredictE2E:
 
     def test_adapter_satisfies_gp_strategy_protocol(self) -> None:
         """GPStrategyAdapter satisfies the GPStrategy protocol."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         adapter = GPStrategyAdapter(
             registry,
@@ -139,7 +138,7 @@ class TestSpecRoundTripE2E:
 
     def test_export_from_spec_predict_identity(self) -> None:
         """Predictions from exported/restored adapter match original."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         gp_config = _small_gp_config()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -170,7 +169,7 @@ class TestWarmStartE2E:
 
     def test_warm_start_second_fit(self) -> None:
         """Second fit with warm_start=True uses previous best as seed."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         gp_config = _small_gp_config()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -222,7 +221,7 @@ class TestTwoStageViaWireObjectivesE2E:
 
     def test_two_stage_evaluator_with_real_programs(self) -> None:
         """TwoStage evaluator works with real evolved programs."""
-        prim_config = PrimitiveConfig(enable_liq_ta=False)
+        prim_config = PrimitiveConfig()
         registry = build_trading_registry(prim_config)
         gp_config = _small_gp_config()
         label_evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -267,7 +266,7 @@ class TestBacktestWithEvolvedProgramE2E:
 
     def test_backtest_evaluator_with_evolved_program(self) -> None:
         """Evolved program evaluates through BacktestFitnessEvaluator."""
-        prim_config = PrimitiveConfig(enable_liq_ta=False)
+        prim_config = PrimitiveConfig()
         registry = build_trading_registry(prim_config)
         gp_config = _small_gp_config()
         label_evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -298,8 +297,8 @@ class TestBacktestWithEvolvedProgramE2E:
 # ------------------------------------------------------------------ #
 
 
-class TestPhase3PublicExports:
-    """Verify Phase 3 types are exported from package root."""
+class TestStage3PublicExports:
+    """Verify Stage 3 types are exported from package root."""
 
     def test_adapter_exports_from_adapters_package(self) -> None:
         from liq.evolution.adapters import GPSignalOutput, GPStrategyAdapter
@@ -329,7 +328,7 @@ class TestPhase3PublicExports:
         assert BacktestFitnessEvaluator is not None
         assert TwoStageFitnessEvaluator is not None
 
-    def test_all_list_contains_phase3_exports(self) -> None:
+    def test_all_list_contains_stage3_exports(self) -> None:
         import liq.evolution
 
         expected = [
@@ -363,17 +362,16 @@ class TestSeedInjectionThroughAdapterE2E:
 
     def test_fit_with_ramped_injection(self) -> None:
         """GPStrategyAdapter.fit() with ramped injection (no seeds needed)."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         gp_config = LiqGPConfig(
             population_size=20,
-            max_depth=4,
+            max_depth=6,
             generations=4,
             seed=42,
             tournament_size=3,
             elitism_count=2,
             constant_opt_enabled=False,
-            semantic_dedup_enabled=False,
             simplification_enabled=False,
             seed_injection=SeedInjectionConfig(
                 method="ramped",
@@ -401,18 +399,17 @@ class TestSeedInjectionThroughAdapterE2E:
 
     def test_fit_with_direct_seed_injection(self) -> None:
         """Direct injection cycles BoolSeries seeds through evolution."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         seeds = _make_bool_series_seeds(registry)
         gp_config = LiqGPConfig(
             population_size=20,
-            max_depth=4,
+            max_depth=6,
             generations=4,
             seed=42,
             tournament_size=3,
             elitism_count=2,
             constant_opt_enabled=False,
-            semantic_dedup_enabled=False,
             simplification_enabled=False,
             seed_injection=SeedInjectionConfig(
                 method="direct",
@@ -438,18 +435,17 @@ class TestSeedInjectionThroughAdapterE2E:
 
     def test_fit_with_variation_seed_injection(self) -> None:
         """Variation injection mutates BoolSeries seeds through evolution."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         seeds = _make_bool_series_seeds(registry)
         gp_config = LiqGPConfig(
             population_size=20,
-            max_depth=4,
+            max_depth=6,
             generations=4,
             seed=42,
             tournament_size=3,
             elitism_count=2,
             constant_opt_enabled=False,
-            semantic_dedup_enabled=False,
             simplification_enabled=False,
             seed_injection=SeedInjectionConfig(
                 method="variation",

@@ -196,7 +196,7 @@ class TestRunnerFailures:
 
 
 class TestFlatPayload:
-    def test_flat_payload_used_for_all_phases(self) -> None:
+    def test_flat_payload_used_for_all_stages(self) -> None:
         """A payload without explicit train/validate/test keys is used for all."""
 
         def flat_runner(

@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from liq.evolution.config import EvolutionConfig, GPConfig, build_gp_config
+from liq.evolution.config import (
+    EvolutionConfig,
+    GPConfig,
+    ParallelConfig,
+    build_gp_config,
+    map_evolution_pressure_to_scheduler_policy,
+)
 from liq.gp.config import GPConfig as LiqGPConfig
 from liq.gp.config import SeedInjectionConfig
 
@@ -88,16 +94,55 @@ class TestBuildGPConfig:
         gp = build_gp_config(evo)
         assert gp.constant_opt_enabled is False
 
-    def test_simplification_and_dedup_forwarded(self) -> None:
+    def test_simplification_forwarded(self) -> None:
         evo = EvolutionConfig(
-            gp=GPConfig(simplification_enabled=False, semantic_dedup_enabled=False),
+            gp=GPConfig(simplification_enabled=False),
         )
         gp = build_gp_config(evo)
         assert gp.simplification_enabled is False
-        assert gp.semantic_dedup_enabled is False
 
     def test_seed_injection_forwarded(self) -> None:
         injection = SeedInjectionConfig(interval=3, count=2, method="variation")
         evo = EvolutionConfig(gp=GPConfig(seed_injection=injection))
         gp = build_gp_config(evo)
         assert gp.seed_injection == injection
+
+    def test_scheduler_policy_is_wired(self) -> None:
+        evo = EvolutionConfig()
+        gp = build_gp_config(evo)
+        assert gp.scheduler.enabled is True
+        assert gp.scheduler.max_in_flight == evo.parallel.max_in_flight
+        assert gp.scheduler.memory_budget_mb == evo.parallel.memory_limit_mb
+
+    def test_policy_mapping_preserves_safety_invariants(self) -> None:
+        evo = EvolutionConfig()
+        scheduler, meta = map_evolution_pressure_to_scheduler_policy(
+            evo,
+            constraint_violations={"max_leverage": 0.3, "negative_cash": 0.2},
+        )
+        assert scheduler.max_in_flight >= 1
+        assert scheduler.queue_capacity >= scheduler.max_in_flight
+        assert scheduler.eval_batch_size >= 1
+        assert scheduler.memory_budget_mb >= 128
+        assert scheduler.safe_fallback_mode in {"sequential", "fail"}
+        assert meta["reason_code"] in {"ok", "constraint_saturation", "critical_constraint_saturation"}
+
+    def test_policy_mapping_saturates_to_safe_fallback(self) -> None:
+        evo = EvolutionConfig(
+            parallel=ParallelConfig(
+                backend="ray",
+                max_workers=2,
+                max_in_flight=4,
+                memory_limit_mb=2048,
+                memory_warn_threshold_mb=1536,
+                auto_fallback=False,
+            )
+        )
+        scheduler, meta = map_evolution_pressure_to_scheduler_policy(
+            evo,
+            constraint_violations={"future_reference": 1.0},
+        )
+        assert scheduler.max_in_flight == 1
+        assert scheduler.queue_capacity == 1
+        assert scheduler.safe_fallback_mode == "sequential"
+        assert meta["reason_code"] == "critical_constraint_saturation"

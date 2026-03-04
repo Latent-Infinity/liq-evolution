@@ -8,11 +8,86 @@ inherit from liq-evolution classes.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+
+from liq.core.security import (
+    SENSITIVE_CONTEXT_KEYS as _SENSITIVE_CONTEXT_KEYS,
+    mask_sensitive_context as _mask_sensitive_context,
+)
+from liq.evolution.errors import (
+    EvaluationContractError,
+    ProtocolVersionError,
+)
 
 if TYPE_CHECKING:
     import numpy as np
     import polars as pl
+
+
+EVOLUTION_PROTOCOL_VERSION = "1.0"
+GP_PROTOCOL_VERSION = "1.0"
+
+SENSITIVE_CONTEXT_KEYS = tuple(_SENSITIVE_CONTEXT_KEYS)
+
+
+def mask_sensitive_context(context: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Return a redacted copy of context for deterministic diagnostics."""
+    return _mask_sensitive_context(context)
+
+
+def require_protocol_version(
+    protocol: str,
+    actual: str,
+    expected: str,
+) -> None:
+    """Reject mismatched protocol versions with deterministic diagnostics."""
+    if actual != expected:
+        raise ProtocolVersionError(
+            f"{protocol} protocol version mismatch: actual={actual!r}, expected={expected!r}"
+        )
+
+
+def translate_protocol_exception(
+    exc: Exception,
+    *,
+    boundary: str,
+    context: Mapping[str, Any] | None = None,
+) -> EvaluationContractError:
+    """Wrap a contract boundary exception with context for replayability."""
+    redacted = mask_sensitive_context(context)
+    payload = f" ({redacted!r})" if redacted else ""
+    msg = f"{boundary} protocol contract failure: {exc}{payload}"
+    return EvaluationContractError(msg)
+
+
+@runtime_checkable
+class CandidateArtifact(Protocol):
+    """Cross-boundary representation of an evolvable candidate."""
+
+    candidate_id: str
+    payload: Mapping[str, Any]
+
+
+@runtime_checkable
+class StrategyArtifact(Protocol):
+    """Cross-boundary representation of an evolved strategy artifact."""
+
+    strategy_id: str
+    candidate: CandidateArtifact
+    model_dump: Callable[..., Mapping[str, Any]]
+
+
+@runtime_checkable
+class CandidateEvaluator(Protocol):
+    """Evaluator protocol used on the GP-evaluator boundary."""
+
+    protocol_version: str
+
+    def evaluate_candidate(
+        self,
+        candidate: CandidateArtifact,
+        context: Any,
+    ) -> Any: ...
 
 
 @runtime_checkable
@@ -76,7 +151,7 @@ class PrimitiveRegistry(Protocol):
     def lookup(self, name: str) -> Any:
         """Compatibility shim for protocol consumers.
 
-        ``liq.gp`` currently exposes ``get``; the phase-0 contract uses
+        ``liq.gp`` currently exposes ``get``; the stage-0 contract uses
         ``lookup``. Protocol default keeps both names available.
         """
 
@@ -120,7 +195,7 @@ class GPStrategy(Protocol):
 class FitnessEvaluator(Protocol):
     """Evaluator for fitness scoring.
 
-    The phase-0 contract uses ``evaluate`` while current package tests
+    The stage-0 contract uses ``evaluate`` while current package tests
     assert ``evaluate_fitness``. Both are provided for compatibility.
     """
 
@@ -147,6 +222,24 @@ class FitnessStageEvaluator(FitnessEvaluator, Protocol):
         context: Any,
     ) -> list[Any]:
         return self.evaluate_fitness(programs, context)
+
+
+@runtime_checkable
+class EvolutionArtifactStore(Protocol):
+    """Persistence abstraction for artifacts crossing stage boundaries."""
+
+    protocol_version: str
+
+    def save_artifact(
+        self,
+        artifact_id: str,
+        artifact: CandidateArtifact | StrategyArtifact,
+    ) -> None: ...
+
+    def load_artifact(
+        self,
+        artifact_id: str,
+    ) -> CandidateArtifact | StrategyArtifact | None: ...
 
 
 @runtime_checkable

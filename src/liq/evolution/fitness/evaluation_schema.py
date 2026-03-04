@@ -311,7 +311,7 @@ def validate_evaluation_metadata(
     require_slice_scores: bool = False,
     objective_directions: Sequence[ObjectiveDirection] | None = None,
 ) -> list[SchemaValidationError]:
-    """Validate a fitness metadata payload against phase-0 contract rules.
+    """Validate a fitness metadata payload against stage-0 contract rules.
 
     Args:
         metadata: Metadata dict from ``FitnessResult``.

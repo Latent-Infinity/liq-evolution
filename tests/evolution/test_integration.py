@@ -46,13 +46,12 @@ def _small_gp_config(*, generations: int = 3, seed: int = 42) -> LiqGPConfig:
     """Small config for fast integration tests."""
     return LiqGPConfig(
         population_size=20,
-        max_depth=4,
+        max_depth=6,
         generations=generations,
         seed=seed,
         tournament_size=3,
         elitism_count=2,
         constant_opt_enabled=False,
-        semantic_dedup_enabled=False,
         simplification_enabled=False,
     )
 
@@ -60,7 +59,7 @@ def _small_gp_config(*, generations: int = 3, seed: int = 42) -> LiqGPConfig:
 class TestEvolveWithTradingPrimitives:
     def test_evolve_completes(self) -> None:
         """Evolution completes without error using trading registry."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -74,7 +73,7 @@ class TestEvolveWithTradingPrimitives:
 
     def test_evolve_produces_valid_program(self) -> None:
         """Best program evaluates to valid float64 array of correct length."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels(n=30)
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -89,7 +88,7 @@ class TestEvolveWithTradingPrimitives:
 
     def test_evolve_reproducible(self) -> None:
         """Same seed produces identical results."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -107,7 +106,7 @@ class TestEvolveWithTradingPrimitives:
 
     def test_evolve_with_label_evaluator(self) -> None:
         """LabelFitnessEvaluator produces FitnessResult objects."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="accuracy", top_k=0.3)
@@ -123,7 +122,7 @@ class TestEvolveWithTradingPrimitives:
 class TestSerializeRoundtrip:
     def test_serialize_evolved_program(self) -> None:
         """Serialize → deserialize → evaluate produces identical output."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -145,7 +144,7 @@ class TestSerializeRoundtrip:
 class TestSimplifyEvolved:
     def test_simplify_evolved_program(self) -> None:
         """Simplification reduces or preserves size, doesn't crash."""
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)
@@ -163,7 +162,7 @@ class TestNSGA2Integration:
         """NSGA-II with 2 objectives produces a non-empty Pareto front."""
         from liq.gp.config import FitnessConfig as LiqFitnessConfig
 
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
 
@@ -191,14 +190,13 @@ class TestNSGA2Integration:
 
         gp_config = LiqGPConfig(
             population_size=20,
-            max_depth=4,
+            max_depth=6,
             generations=3,
             seed=42,
             tournament_size=3,
             elitism_count=2,
             selection_mode="nsga2",
             constant_opt_enabled=False,
-            semantic_dedup_enabled=False,
             simplification_enabled=False,
             fitness=LiqFitnessConfig(
                 objectives=["fitness", "complexity"],
@@ -217,13 +215,13 @@ class TestConfigBridgeIntegration:
         """Config bridge produces a config usable by evolve()."""
         evo_config = EvolutionConfig(
             population_size=20,
-            max_depth=4,
+            max_depth=6,
             generations=2,
             seed=42,
         )
         gp_config = build_gp_config(evo_config)
 
-        config = PrimitiveConfig(enable_liq_ta=False)
+        config = PrimitiveConfig()
         registry = build_trading_registry(config)
         ctx = _make_context_with_labels()
         evaluator = LabelFitnessEvaluator(metric="f1", top_k=0.5)

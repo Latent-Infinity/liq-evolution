@@ -285,8 +285,7 @@ class TestMultiFidelityEvaluation:
             promotion_strategy="scalarized",
         )
 
-        with pytest.warns(UserWarning, match="fewer objectives than expected"):
-            evaluator.evaluate([0, 1, 2], {})
+        evaluator.evaluate([0, 1, 2], {})
         assert level1.calls == [(1,)]
 
     def test_pareto_promotion_respects_front(self) -> None:
@@ -639,7 +638,7 @@ class TestMultiFidelityEvaluation:
         evaluator.evaluate([0, 1, 2], {})
         assert level1.calls == [(0, 1)]
 
-    def test_rank_key_prefers_default_objective_direction_warning(self) -> None:
+    def test_rank_key_prefers_default_objective_direction_when_missing(self) -> None:
         level0 = _ScoreByProgramEvaluator([1.0])
         evaluator = MultiFidelityFitnessEvaluator(
             levels=(level0,),
@@ -648,8 +647,7 @@ class TestMultiFidelityEvaluation:
         )
         result = FitnessResult(objectives=(1.0,), metadata={})
 
-        with pytest.warns(UserWarning, match="defaulting to maximize"):
-            assert evaluator._rank_key(result, 1, 0)[0] == 1.0
+        assert evaluator._rank_key(result, 1, 0)[0] == 1.0
 
     def test_normalize_top_k_validation_edges(self) -> None:
         with pytest.raises(ValueError, match="scalar or one value per transition"):

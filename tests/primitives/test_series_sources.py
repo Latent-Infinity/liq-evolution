@@ -20,12 +20,13 @@ EXPECTED_TERMINALS = {
     "volume",
     "log_returns",
     "midrange",
-    "typical_price",
-    "ha_open",
-    "ha_high",
-    "ha_low",
-    "ha_close",
-    "ephemeral_float",
+        "typical_price",
+        "range",
+        "ha_open",
+        "ha_high",
+        "ha_low",
+        "ha_close",
+        "ephemeral_float",
 }
 
 
@@ -53,7 +54,7 @@ class TestRegisterSeriesSources:
     def test_count(self) -> None:
         reg = PrimitiveRegistry()
         register_series_sources(reg)
-        assert len(reg.list_primitives(category="terminal")) == 13
+        assert len(reg.list_primitives(category="terminal")) == 14
 
 
 class TestPrepareEvaluationContext:

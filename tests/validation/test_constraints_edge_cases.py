@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from liq.evolution.validation import (
     ConstraintPolicy,
     constraint_max_leverage,
@@ -19,6 +21,13 @@ from liq.gp.types import Series
 
 def _program() -> TerminalNode:
     return TerminalNode("close", Series)
+
+
+class _BadFloat(int):
+    """Type that is isinstance(int) but cannot convert via float()."""
+
+    def __float__(self) -> float:  # type: ignore[override]
+        raise TypeError("cannot coerce")
 
 
 class TestCoerceFiniteNonneg:
@@ -54,6 +63,9 @@ class TestCoerceFiniteNonneg:
     def test_positive_int_returns_float(self) -> None:
         assert _coerce_finite_nonneg(5) == 5.0
 
+    def test_badly_coercible_int_subclass_returns_none(self) -> None:
+        assert _coerce_finite_nonneg(_BadFloat(1)) is None
+
     def test_positive_float_returns_float(self) -> None:
         assert _coerce_finite_nonneg(3.14) == 3.14
 
@@ -81,6 +93,9 @@ class TestCoerceFiniteFloat:
 
     def test_negative_returns_value(self) -> None:
         assert _coerce_finite_float(-5.0) == -5.0
+
+    def test_badly_coercible_int_subclass_returns_none(self) -> None:
+        assert _coerce_finite_float(_BadFloat(1)) is None
 
 
 class TestExtractSequenceFloats:
@@ -230,3 +245,30 @@ class TestConstraintPolicyEdgePaths:
         policy = ConstraintPolicy(checks=(string_penalty_check,))
         violations = policy.evaluate(_program(), {})
         assert "test" not in violations
+
+    def test_robustness_rollout_with_partial_limits_only(self) -> None:
+        policy = ConstraintPolicy(
+            robustness_rollout="standard",
+            regime_coverage_floor=0.8,
+        )
+        violations = policy.evaluate(_program(), {"metrics": {"regime_coverage": 0.7}})
+
+        assert "robustness:regime_coverage_below_floor" in violations
+        assert "robustness:turnover_missing" not in violations
+        assert "robustness:drawdown_missing" not in violations
+
+    def test_rejects_invalid_robustness_rollout(self) -> None:
+        with pytest.raises(ValueError, match="robustness_rollout"):
+            ConstraintPolicy(robustness_rollout="beta")
+
+    def test_rejects_negative_parametric_limits(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            ConstraintPolicy(turnover_cap=-0.1)
+
+    def test_rejects_regime_coverage_over_one(self) -> None:
+        with pytest.raises(ValueError, match="regime_coverage_floor"):
+            ConstraintPolicy(regime_coverage_floor=1.1)
+
+    def test_rejects_non_numeric_parametric_limits(self) -> None:
+        with pytest.raises(ValueError, match="must be numeric"):
+            ConstraintPolicy(drawdown_cap="oops")  # type: ignore[arg-type]

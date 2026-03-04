@@ -1,4 +1,4 @@
-"""Tests for ParallelEvaluator memory pressure checks (Phase 4, Step 6).
+"""Tests for ParallelEvaluator memory pressure checks (Stage 4, Step 6).
 
 Uses mocked resource.getrusage to control RSS values without requiring
 actual memory allocation.

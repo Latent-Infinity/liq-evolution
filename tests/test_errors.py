@@ -6,18 +6,24 @@ import pytest
 
 from liq.evolution.errors import (
     AdapterError,
+    CandidateArtifactError,
+    DeterminismViolationError,
     ConfigurationError,
     FitnessEvaluationError,
     LiqEvolutionError,
+    ProtocolVersionError,
     ParallelExecutionError,
     PrimitiveSetupError,
 )
 
 ALL_SUBCLASSES = [
     PrimitiveSetupError,
+    CandidateArtifactError,
+    DeterminismViolationError,
     FitnessEvaluationError,
     AdapterError,
     ConfigurationError,
+    ProtocolVersionError,
     ParallelExecutionError,
 ]
 

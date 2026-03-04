@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import math
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -56,6 +59,9 @@ from liq.sim.fx_eval import (
     tail_stability,
     turnover_from_positions,
 )
+
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OBJECTIVES = (
     "cagr",
@@ -193,21 +199,21 @@ class StrategyEvaluator:
             )
 
         split_weight_values = {
-            phase: float(configured_split_weights.get(phase, default))
-            for phase, default in {
+            stage: float(configured_split_weights.get(stage, default))
+            for stage, default in {
                 "train": 1.0,
                 "validate": 1.0,
                 "test": 0.0,
             }.items()
         }
-        for phase, weight in split_weight_values.items():
+        for stage, weight in split_weight_values.items():
             if not math.isfinite(weight):
                 raise ValueError(
-                    f"split_weights[{phase}] must be finite, got {weight!r}"
+                    f"split_weights[{stage}] must be finite, got {weight!r}"
                 )
             if weight < 0.0:
                 raise ValueError(
-                    f"split_weights[{phase}] must be non-negative, got {weight!r}"
+                    f"split_weights[{stage}] must be non-negative, got {weight!r}"
                 )
 
         self._config = StrategyEvaluatorConfig(
@@ -244,9 +250,36 @@ class StrategyEvaluator:
         if "labels" not in context:
             raise FitnessEvaluationError("Context must include 'labels'")
 
+        run_id = str(context.get("run_id", "unknown-run"))
         results: list[FitnessResult] = []
-        for program in programs:
-            results.append(self._evaluate_single(program, context))
+        start = time.perf_counter()
+        for index, program in enumerate(programs):
+            candidate_hash = self._program_hash(program, index=index)
+            program_start = time.perf_counter()
+            try:
+                result = self._evaluate_single(program, context)
+            except Exception:
+                logger.exception(
+                    "strategy_evaluator candidate_failed run_id=%s candidate_hash=%s split_count=%s",
+                    run_id,
+                    candidate_hash,
+                    len(self._splits),
+                )
+                raise
+            results.append(result)
+            logger.info(
+                "strategy_evaluator candidate_complete run_id=%s candidate_hash=%s split_count=%s elapsed_ms=%.3f",
+                run_id,
+                candidate_hash,
+                len(self._splits),
+                _to_ms(program_start),
+            )
+        logger.info(
+            "strategy_evaluator batch_complete run_id=%s candidates=%s elapsed_ms=%.3f",
+            run_id,
+            len(programs),
+            _to_ms(start),
+        )
         return results
 
     def evaluate_fitness(
@@ -261,6 +294,7 @@ class StrategyEvaluator:
         self, program: Program, context: Mapping[str, Any]
     ) -> FitnessResult:
         strategy = _ProgramStrategy(program)
+        candidate_hash = self._program_hash(program)
         split_metrics: dict[str, dict[str, float]] = {}
         slice_scores: dict[str, float] = {}
         raw_objective_sums = dict.fromkeys(self._objectives, 0.0)
@@ -275,6 +309,7 @@ class StrategyEvaluator:
             try:
                 split_id_fallback = split.slice_id
                 split_payload = None
+                split_start = time.perf_counter()
                 if self._cache is not None:
                     cache_key = self._cache.make_key(
                         program_hash,
@@ -295,7 +330,24 @@ class StrategyEvaluator:
 
                 if split_payload is None:
                     split_payload = self._backtest_runner(strategy, context, split)
+                elapsed_ms = _to_ms(split_start)
+                logger.info(
+                    "strategy_evaluator split_evaluated run_id=%s candidate_hash=%s stage=%s split_id=%s elapsed_ms=%.3f",
+                    str(context.get("run_id", "unknown-run")),
+                    candidate_hash,
+                    "split",
+                    split.slice_id,
+                    elapsed_ms,
+                )
             except Exception as exc:
+                logger.exception(
+                    "strategy_evaluator split_failed run_id=%s candidate_hash=%s stage=%s split_id=%s elapsed_ms=%.3f",
+                    str(context.get("run_id", "unknown-run")),
+                    candidate_hash,
+                    "split",
+                    split.slice_id,
+                    _to_ms(split_start),
+                )
                 raise FitnessEvaluationError(
                     f"Backtest runner failed for split {split.slice_id}"
                 ) from exc
@@ -321,15 +373,15 @@ class StrategyEvaluator:
                         split_payload,
                     )
 
-            split_phases = self._normalize_split_payload(split_payload, split_id)
-            for phase, phase_payload in split_phases.items():
-                if phase == "test" and not self._include_test:
+            split_stages = self._normalize_split_payload(split_payload, split_id)
+            for stage, stage_payload in split_stages.items():
+                if stage == "test" and not self._include_test:
                     continue
-                metrics = self._extract_phase_metrics(phase_payload)
-                split_key = f"{split_id}:{phase}"
+                metrics = self._extract_stage_metrics(stage_payload)
+                split_key = f"{split_id}:{stage}"
                 split_metrics[split_key] = metrics
 
-                weight = self._split_weight(phase)
+                weight = self._split_weight(stage)
                 for index, objective_name in enumerate(self._objectives):
                     value = metrics[objective_name]
                     raw_objective_sums[objective_name] += value * weight
@@ -344,7 +396,7 @@ class StrategyEvaluator:
                         )
 
                 for key, raw_penalty in self._extract_constraint_violations(
-                    phase_payload,
+                    stage_payload,
                     program,
                     split_key,
                 ).items():
@@ -354,13 +406,13 @@ class StrategyEvaluator:
                     )
                     slice_scores[f"{split_key}:constraint:{key}"] = raw_penalty
 
-                for key, raw_score in self._extract_phase_slice_scores(
-                    phase_payload,
+                for key, raw_score in self._extract_stage_slice_scores(
+                    stage_payload,
                 ).items():
                     for case_key in _normalize_slice_score_key(split_key, key):
                         slice_scores[case_key] = _coerce_nonnegative(raw_score)
 
-                traces = self._extract_traces(phase_payload)
+                traces = self._extract_traces(stage_payload)
                 if traces is not None:
                     descriptor_profiles.append(
                         extract_behavior_descriptors(
@@ -413,6 +465,17 @@ class StrategyEvaluator:
             },
         )
 
+    def _program_hash(self, program: Program, *, index: int | None = None) -> str:
+        if index is not None:
+            fallback = f"{index}"
+        else:
+            fallback = "program"
+        try:
+            return compute_program_hash(program)
+        except Exception:
+            payload = repr(program) or fallback
+            return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
     def _normalize_split_payload(
         self,
         split_payload: Mapping[str, Any],
@@ -423,7 +486,7 @@ class StrategyEvaluator:
                 f"backtest runner must return mapping for split {split_id}"
             )
 
-        if all(phase in split_payload for phase in ("train", "validate", "test")):
+        if all(stage in split_payload for stage in ("train", "validate", "test")):
             return {
                 "train": split_payload["train"],
                 "validate": split_payload["validate"],
@@ -482,17 +545,17 @@ class StrategyEvaluator:
             f"test={test_bounds[0]}:{test_bounds[1]}"
         )
 
-    def _extract_phase_metrics(
-        self, phase_payload: Mapping[str, Any]
+    def _extract_stage_metrics(
+        self, stage_payload: Mapping[str, Any]
     ) -> dict[str, float]:
-        metrics = _safe_mapping_float_dict(phase_payload.get("metrics"))
-        traces = self._extract_traces(phase_payload)
+        metrics = _safe_mapping_float_dict(stage_payload.get("metrics"))
+        traces = self._extract_traces(stage_payload)
         traces = traces if traces is not None else {}
         equity = _to_float_sequence(traces.get("equity_curve"))
         pnl = _to_float_sequence(traces.get("pnl_trace"))
         position = _to_float_sequence(traces.get("position_trace"))
 
-        # Trace-derived baseline metrics (used when phase metrics are missing).
+        # Trace-derived baseline metrics (used when stage metrics are missing).
         summary = summarize_fx_performance(equity) if equity else {}
         derived = {
             "cagr": summary.get("total_return", 0.0),
@@ -517,13 +580,13 @@ class StrategyEvaluator:
 
     def _extract_constraint_violations(
         self,
-        phase_payload: Mapping[str, Any],
+        stage_payload: Mapping[str, Any],
         program: Program,
         split_key: str,
     ) -> dict[str, float]:
         violations = {}
         raw_violations = _safe_mapping_float_dict(
-            phase_payload.get("constraint_violations")
+            stage_payload.get("constraint_violations")
         )
         for key, value in raw_violations.items():
             safe_value = _coerce_nonnegative(float(value))
@@ -531,14 +594,14 @@ class StrategyEvaluator:
                 safe_value = 0.0
             violations[key] = safe_value
 
-        policy_violations = self._constraint_policy.evaluate(program, phase_payload)
+        policy_violations = self._constraint_policy.evaluate(program, stage_payload)
         for key, value in policy_violations.items():
             safe_value = _coerce_nonnegative(value)
             if safe_value > 0.0:
                 violations[f"{split_key}:{key}"] = safe_value
 
         for key, value in _safe_mapping_float_dict(
-            phase_payload.get("adversarial_cases")
+            stage_payload.get("adversarial_cases")
         ).items():
             safe_value = _coerce_nonnegative(value)
             if safe_value > 0.0:
@@ -546,16 +609,16 @@ class StrategyEvaluator:
 
         return violations
 
-    def _extract_phase_slice_scores(
+    def _extract_stage_slice_scores(
         self,
-        phase_payload: Mapping[str, Any],
+        stage_payload: Mapping[str, Any],
     ) -> dict[str, float]:
-        return _safe_mapping_float_dict(phase_payload.get("slice_scores"))
+        return _safe_mapping_float_dict(stage_payload.get("slice_scores"))
 
     def _extract_traces(
-        self, phase_payload: Mapping[str, Any]
+        self, stage_payload: Mapping[str, Any]
     ) -> dict[str, Any] | None:
-        traces = phase_payload.get("traces")
+        traces = stage_payload.get("traces")
         if isinstance(traces, Mapping):
             return dict(traces)
         if isinstance(traces, Iterable) and not isinstance(traces, (str, bytes)):
@@ -563,10 +626,10 @@ class StrategyEvaluator:
             return {"position_trace": traces}
         return None
 
-    def _split_weight(self, phase: str) -> float:
-        if phase == "train":
+    def _split_weight(self, stage: str) -> float:
+        if stage == "train":
             return self._config.split_weights[0]
-        if phase == "validate":
+        if stage == "validate":
             return self._config.split_weights[1]
         return self._config.split_weights[2]
 
@@ -635,6 +698,10 @@ def _safe_mapping_float_dict(value: Any) -> dict[str, float]:
         except (TypeError, ValueError):
             continue
     return output
+
+
+def _to_ms(start: float) -> float:
+    return (time.perf_counter() - start) * 1000.0
 
 
 def _normalize_slice_score_key(split_key: str, case_key: str) -> tuple[str, ...]:

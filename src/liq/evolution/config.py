@@ -8,13 +8,15 @@ time (fail-fast).  Invalid values raise
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Self
+import math
+from typing import Any, Literal, Mapping, Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from liq.evolution.errors import ConfigurationError
 from liq.gp.config import FitnessConfig as LiqGPFitnessConfig
 from liq.gp.config import GPConfig as LiqGPConfig
+from liq.gp.config import SchedulerConfig as LiqGPSchedulerConfig
 from liq.gp.config import SeedInjectionConfig as LiqGPSeedInjectionConfig
 
 
@@ -28,8 +30,6 @@ class PrimitiveConfig(BaseModel, frozen=True):
         enable_crossover_ops: Register crossover detection operators.
         enable_temporal_ops: Register temporal/lag operators.
         enable_series_sources: Register price/volume series terminals.
-        enable_liq_ta: Register liq-ta indicator primitives (requires
-            the ``[indicators]`` extra).
     """
 
     enable_numeric_ops: bool = True
@@ -38,7 +38,6 @@ class PrimitiveConfig(BaseModel, frozen=True):
     enable_crossover_ops: bool = True
     enable_temporal_ops: bool = True
     enable_series_sources: bool = True
-    enable_liq_ta: bool = False
 
 
 class FitnessStageConfig(BaseModel, frozen=True):
@@ -122,7 +121,7 @@ class WarmStartConfig(BaseModel, frozen=True):
 
 
 class GPConfig(BaseModel, frozen=True):
-    """Canonical phase-0 configuration for core GP evolution controls."""
+    """Canonical stage-0 configuration for core GP evolution controls."""
 
     population_size: int = 300
     max_depth: int = 8
@@ -142,9 +141,8 @@ class GPConfig(BaseModel, frozen=True):
     constant_opt_max_iter: int = 50
     constant_opt_max_time_seconds: float = 1.0
 
-    # Simplification & semantic dedup
+    # Simplification
     simplification_enabled: bool = True
-    semantic_dedup_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_gp_config(self) -> Self:
@@ -190,7 +188,7 @@ class GPConfig(BaseModel, frozen=True):
 
 
 class FitnessConfig(BaseModel, frozen=True):
-    """Canonical phase-0 configuration for fitness-stage control."""
+    """Canonical stage-0 configuration for fitness-stage control."""
 
     objectives: tuple[str, ...] = ("fitness",)
     objective_directions: tuple[Literal["maximize", "minimize"], ...] = ("maximize",)
@@ -218,11 +216,75 @@ class FitnessConfig(BaseModel, frozen=True):
         return self
 
 
+class RegimeGateConfig(BaseModel, frozen=True):
+    """Gating policy for strategy regime behavior during prediction."""
+
+    regime_confidence_threshold: float = 0.55
+    regime_occupancy_threshold: float = 0.10
+    regime_hysteresis_margin: float = 0.05
+    regime_min_persistence: int = 2
+
+    @model_validator(mode="after")
+    def _validate_regime_gates(self) -> Self:
+        if not 0.0 <= self.regime_confidence_threshold <= 1.0:
+            raise ConfigurationError(
+                "regime_confidence_threshold must be in [0.0, 1.0]"
+            )
+        if not 0.0 <= self.regime_occupancy_threshold <= 1.0:
+            raise ConfigurationError(
+                "regime_occupancy_threshold must be in [0.0, 1.0]"
+            )
+        if self.regime_hysteresis_margin < 0.0:
+            raise ConfigurationError("regime_hysteresis_margin must be >= 0.0")
+        if self.regime_min_persistence < 1:
+            raise ConfigurationError(
+                "regime_min_persistence must be >= 1"
+            )
+        return self
+
+
 class SerializationConfig(BaseModel, frozen=True):
     """Configuration for serialized strategy/program payloads."""
 
     schema_version: str = "1.0"
     enable_persistent_cache: bool = False
+
+
+class EvolutionRunConfig(BaseModel, frozen=True):
+    """Stage-0 run controls for stage budgets and deterministic replay."""
+
+    protocol_version: str = "1.0"
+    stage_a_candidate_budget: int = 5000
+    stage_b_candidate_budget: int = 500
+    stage_a_min_candidates: int = 1
+    stage_b_min_candidates: int = 1
+    stage_a_threshold: float = 0.8
+
+    @model_validator(mode="after")
+    def _validate_run_config(self) -> Self:
+        if self.stage_a_candidate_budget < 1:
+            raise ConfigurationError("stage_a_candidate_budget must be >= 1")
+        if self.stage_b_candidate_budget < 1:
+            raise ConfigurationError("stage_b_candidate_budget must be >= 1")
+        if self.stage_a_min_candidates < 1:
+            raise ConfigurationError("stage_a_min_candidates must be >= 1")
+        if self.stage_b_min_candidates < 1:
+            raise ConfigurationError("stage_b_min_candidates must be >= 1")
+        if not 0.0 < self.stage_a_threshold <= 1.0:
+            raise ConfigurationError("stage_a_threshold must be in (0, 1]")
+        if self.stage_a_min_candidates > self.stage_a_candidate_budget:
+            raise ConfigurationError(
+                "stage_a_min_candidates cannot exceed stage_a_candidate_budget"
+            )
+        if self.stage_b_min_candidates > self.stage_b_candidate_budget:
+            raise ConfigurationError(
+                "stage_b_min_candidates cannot exceed stage_b_candidate_budget"
+            )
+        if self.protocol_version != "1.0":
+            raise ConfigurationError(
+                "EvolutionRunConfig protocol_version must currently be '1.0'"
+            )
+        return self
 
 
 class EvolutionConfig(BaseModel, frozen=True):
@@ -251,12 +313,14 @@ class EvolutionConfig(BaseModel, frozen=True):
     seed: int = 42
     batch_size: int | None = None
     full_eval_interval: int = 10
+    run: EvolutionRunConfig = Field(default_factory=EvolutionRunConfig)
     primitives: PrimitiveConfig = PrimitiveConfig()
     fitness_stages: FitnessStageConfig = FitnessStageConfig()
     fitness: FitnessConfig = FitnessConfig()
     parallel: ParallelConfig = ParallelConfig()
     gp: GPConfig = Field(default_factory=GPConfig)
     warm_start: WarmStartConfig = WarmStartConfig()
+    regime: RegimeGateConfig = Field(default_factory=RegimeGateConfig)
 
     @model_validator(mode="after")
     def _validate_evolution(self) -> Self:
@@ -310,6 +374,10 @@ def build_gp_config(evo: EvolutionConfig) -> LiqGPConfig:
 
     cr = local.crossover_rate
     mr = local.mutation_rate
+    scheduler_policy, _ = map_evolution_pressure_to_scheduler_policy(
+        evo,
+        constraint_violations={},
+    )
 
     return LiqGPConfig(
         population_size=evo.population_size,
@@ -331,11 +399,81 @@ def build_gp_config(evo: EvolutionConfig) -> LiqGPConfig:
         constant_opt_max_iter=local.constant_opt_max_iter,
         constant_opt_max_time_seconds=local.constant_opt_max_time_seconds,
         simplification_enabled=local.simplification_enabled,
-        semantic_dedup_enabled=local.semantic_dedup_enabled,
         fitness=LiqGPFitnessConfig(
             objectives=list(evo.fitness.objectives),
             objective_directions=list(evo.fitness.objective_directions),
             batch_size=evo.batch_size,
             full_eval_interval=evo.full_eval_interval,
         ),
+        scheduler=scheduler_policy,
     )
+
+
+def map_evolution_pressure_to_scheduler_policy(
+    evo: EvolutionConfig,
+    *,
+    constraint_violations: Mapping[str, float] | None = None,
+) -> tuple[LiqGPSchedulerConfig, dict[str, Any]]:
+    """Map evolution pressure/constraint payloads into bounded GP scheduler policy.
+
+    Returns:
+        Tuple of scheduler config and metadata describing the mapping decision.
+    """
+    violations = dict(constraint_violations or {})
+    finite_non_negative = [
+        float(value)
+        for value in violations.values()
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    ]
+    finite_non_negative = [max(0.0, value) for value in finite_non_negative]
+    pressure_score = float(sum(finite_non_negative))
+    has_critical_violation = bool(violations.get("future_reference", 0.0) > 0.0)
+
+    max_in_flight = max(1, evo.parallel.max_in_flight)
+    queue_capacity = max(max_in_flight, max_in_flight * 2)
+    eval_batch_size = max(
+        1,
+        min(64, evo.population_size // max(1, evo.parallel.max_workers)),
+    )
+    eval_timeout_seconds = max(
+        1.0,
+        min(120.0, evo.gp.constant_opt_max_time_seconds * 10.0),
+    )
+    max_cpu_workers = max(
+        1,
+        evo.parallel.max_workers if evo.parallel.backend == "ray" else 1,
+    )
+    safe_fallback_mode: Literal["sequential", "fail"] = (
+        "sequential" if evo.parallel.auto_fallback else "fail"
+    )
+    reason_code = "ok"
+
+    if pressure_score >= 1.0 or has_critical_violation:
+        max_in_flight = 1
+        queue_capacity = 1
+        eval_batch_size = min(eval_batch_size, 8)
+        eval_timeout_seconds = min(eval_timeout_seconds, 5.0)
+        safe_fallback_mode = "sequential"
+        reason_code = (
+            "critical_constraint_saturation"
+            if has_critical_violation
+            else "constraint_saturation"
+        )
+
+    scheduler = LiqGPSchedulerConfig(
+        enabled=True,
+        max_in_flight=max_in_flight,
+        queue_capacity=queue_capacity,
+        eval_batch_size=eval_batch_size,
+        eval_timeout_seconds=eval_timeout_seconds,
+        memory_budget_mb=evo.parallel.memory_limit_mb,
+        max_cpu_workers=max_cpu_workers,
+        safe_fallback_mode=safe_fallback_mode,
+    )
+    metadata: dict[str, Any] = {
+        "reason_code": reason_code,
+        "pressure_score": pressure_score,
+        "violation_count": len(violations),
+        "safe_fallback_mode": safe_fallback_mode,
+    }
+    return scheduler, metadata

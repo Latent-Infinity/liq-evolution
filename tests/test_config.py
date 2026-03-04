@@ -9,9 +9,11 @@ from pydantic import ValidationError
 
 from liq.evolution.config import (
     EvolutionConfig,
+    EvolutionRunConfig,
     FitnessConfig,
     FitnessStageConfig,
     GPConfig,
+    RegimeGateConfig,
     ParallelConfig,
     PrimitiveConfig,
     SerializationConfig,
@@ -32,17 +34,15 @@ class TestPrimitiveConfigDefaults:
         assert cfg.enable_crossover_ops is True
         assert cfg.enable_temporal_ops is True
         assert cfg.enable_series_sources is True
-        assert cfg.enable_liq_ta is False
 
     def test_frozen(self) -> None:
         cfg = PrimitiveConfig()
         with pytest.raises(ValidationError):
-            cfg.enable_liq_ta = True  # type: ignore[misc]
+            cfg.enable_numeric_ops = False  # type: ignore[misc]
 
     def test_custom_values(self) -> None:
-        cfg = PrimitiveConfig(enable_numeric_ops=False, enable_liq_ta=True)
+        cfg = PrimitiveConfig(enable_numeric_ops=False)
         assert cfg.enable_numeric_ops is False
-        assert cfg.enable_liq_ta is True
 
 
 class TestFitnessStageConfigDefaults:
@@ -168,11 +168,10 @@ class TestEvolutionConfigDefaults:
 
     def test_nested_config_override(self) -> None:
         cfg = EvolutionConfig(
-            primitives=PrimitiveConfig(enable_liq_ta=True),
+            primitives=PrimitiveConfig(),
             parallel=ParallelConfig(max_workers=4),
             gp=GPConfig(mutation_rate=0.4, crossover_rate=0.5),
         )
-        assert cfg.primitives.enable_liq_ta is True
         assert cfg.parallel.max_workers == 4
         assert cfg.gp.mutation_rate == 0.4
         assert cfg.gp.crossover_rate == 0.5
@@ -183,6 +182,59 @@ class TestEvolutionConfigDefaults:
                 population_size=300,
                 gp=GPConfig(population_size=500),
             )
+
+    def test_run_config_defaults_embedded(self) -> None:
+        cfg = EvolutionConfig()
+        assert cfg.run.protocol_version == "1.0"
+        assert cfg.run.stage_a_candidate_budget > 0
+
+
+class TestEvolutionRunConfig:
+    """Verify stage-0 stage budget contract enforcement."""
+
+    def test_defaults(self) -> None:
+        cfg = EvolutionRunConfig()
+        assert cfg.protocol_version == "1.0"
+        assert cfg.stage_a_candidate_budget == 5000
+        assert cfg.stage_b_candidate_budget == 500
+        assert cfg.stage_a_threshold == 0.8
+
+    def test_frozen(self) -> None:
+        cfg = EvolutionRunConfig()
+        with pytest.raises(ValidationError):
+            cfg.stage_a_candidate_budget = 5  # type: ignore[misc]
+
+    def test_invalid_threshold_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="stage_a_threshold"):
+            EvolutionRunConfig(stage_a_threshold=0.0)
+
+    def test_stage_a_candidate_min_validation(self) -> None:
+        with pytest.raises(ConfigurationError, match="must be >= 1"):
+            EvolutionRunConfig(stage_a_candidate_budget=0)
+
+    def test_stage_a_min_candidates_rejects_nonpositive(self) -> None:
+        with pytest.raises(ConfigurationError, match="stage_a_min_candidates must be >= 1"):
+            EvolutionRunConfig(stage_a_min_candidates=0)
+
+    def test_stage_b_min_candidates_rejects_nonpositive(self) -> None:
+        with pytest.raises(ConfigurationError, match="stage_b_min_candidates must be >= 1"):
+            EvolutionRunConfig(stage_b_min_candidates=0)
+
+    def test_protocol_version_rejects_unknown_schema(self) -> None:
+        with pytest.raises(ConfigurationError, match="protocol_version must currently"):
+            EvolutionRunConfig(protocol_version="2.0")
+
+    def test_min_candidates_cannot_exceed_budgets(self) -> None:
+        with pytest.raises(ConfigurationError, match="cannot exceed"):
+            EvolutionRunConfig(stage_a_candidate_budget=10, stage_a_min_candidates=11)
+
+    def test_stage_b_candidate_budget_zero_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="stage_b_candidate_budget"):
+            EvolutionRunConfig(stage_b_candidate_budget=0)
+
+    def test_stage_b_min_candidates_exceeds_budget(self) -> None:
+        with pytest.raises(ConfigurationError, match="cannot exceed"):
+            EvolutionRunConfig(stage_b_candidate_budget=5, stage_b_min_candidates=6)
 
 
 class TestGPConfig:
@@ -267,7 +319,6 @@ class TestGPConfig:
     def test_simplification_and_dedup_defaults(self) -> None:
         cfg = GPConfig()
         assert cfg.simplification_enabled is True
-        assert cfg.semantic_dedup_enabled is True
 
     def test_constant_opt_disabled(self) -> None:
         cfg = GPConfig(constant_opt_enabled=False)
@@ -304,6 +355,19 @@ class TestGPConfig:
         assert cfg.seed_injection is not None
         assert cfg.seed_injection.count == 8
 
+    def test_invalid_constant_opt_mode_rejected(self) -> None:
+        with pytest.raises((ConfigurationError, ValidationError), match="constant_opt_mode"):
+            GPConfig(constant_opt_mode="bad")
+
+    def test_constant_opt_max_evals_rejects_nonpositive(self) -> None:
+        with pytest.raises(ConfigurationError, match="constant_opt_max_evals"):
+            GPConfig(constant_opt_max_evals=0)
+
+    def test_constant_opt_mode_rejected_in_model_validator(self) -> None:
+        cfg = GPConfig.model_construct(constant_opt_mode="bad")
+        with pytest.raises(ConfigurationError, match="constant_opt_mode"):
+            cfg._validate_gp_config()
+
 
 class TestFitnessConfig:
     """Verify FitnessConfig default values and validation."""
@@ -324,6 +388,29 @@ class TestFitnessConfig:
         with pytest.raises(ConfigurationError, match="top_k_for_backtest"):
             FitnessConfig(top_k_for_backtest=0)
 
+    def test_empty_objectives_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="objectives must be non-empty"):
+            FitnessConfig(objectives=())
+
+    def test_direction_count_mismatch_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="must equal"):
+            FitnessConfig(
+                objectives=("f1", "accuracy"),
+                objective_directions=("maximize",),
+            )
+
+    def test_invalid_objective_direction_rejected(self) -> None:
+        with pytest.raises(
+            (ConfigurationError, ValidationError),
+            match=r"'maximize' or 'minimize'",
+        ):
+            FitnessConfig(objectives=("f1",), objective_directions=("noop",))
+
+    def test_objective_direction_rejected_in_model_validator(self) -> None:
+        cfg = FitnessConfig.model_construct(objectives=("f1",), objective_directions=("noop",))
+        with pytest.raises(ConfigurationError, match="objective_directions\\[0\\]"):
+            cfg._validate_fitness_config()
+
 
 class TestSerializationConfig:
     """Verify SerializationConfig default values."""
@@ -340,3 +427,23 @@ class TestSerializationConfig:
     def test_custom_version(self) -> None:
         cfg = SerializationConfig(schema_version="2.0")
         assert cfg.schema_version == "2.0"
+
+
+class TestRegimeGateConfig:
+    """Verify RegimeGateConfig validation contract."""
+
+    def test_regime_confidence_threshold_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="regime_confidence_threshold"):
+            RegimeGateConfig(regime_confidence_threshold=1.25)
+
+    def test_regime_occupancy_threshold_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="regime_occupancy_threshold"):
+            RegimeGateConfig(regime_occupancy_threshold=-0.01)
+
+    def test_regime_persistence_invalid(self) -> None:
+        with pytest.raises(ConfigurationError, match="regime_min_persistence"):
+            RegimeGateConfig(regime_min_persistence=0)
+
+    def test_regime_hysteresis_margin_invalid(self) -> None:
+        with pytest.raises(ConfigurationError, match="regime_hysteresis_margin"):
+            RegimeGateConfig(regime_hysteresis_margin=-0.5)

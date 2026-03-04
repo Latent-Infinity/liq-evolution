@@ -84,5 +84,5 @@ def test_turnover_objective_uses_position_churn_metric() -> None:
         },
     }
 
-    metrics = evaluator._extract_phase_metrics(payload)
+    metrics = evaluator._extract_stage_metrics(payload)
     assert metrics["turnover"] == turnover_from_positions([1.0, 4.0, 2.0])

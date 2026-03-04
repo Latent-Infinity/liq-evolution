@@ -1,0 +1,44 @@
+{
+  "artifact_version": "indicator_backend_benchmark_v1",
+  "seed": 20260303,
+  "input_size": 2048,
+  "legacy_fixture": {
+    "name": "legacy_bridge_fixture_v1",
+    "normalization_passes": 8
+  },
+  "cached_workload": {
+    "warmup_calls": 10,
+    "repetitions": 80,
+    "p90_regression_cap_x": 20.0
+  },
+  "uncached_workload": {
+    "repetitions": 20,
+    "p90_regression_cap_x": 20.0
+  },
+  "indicators": [
+    {
+      "name": "rsi",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "name": "atr",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "name": "natr",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "name": "abnormal_turnover",
+      "params": {
+        "period": 20
+      }
+    }
+  ]
+}

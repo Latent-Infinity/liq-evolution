@@ -1,4 +1,4 @@
-"""Tests for phase-0 fitness metadata contract validation."""
+"""Tests for stage-0 fitness metadata contract validation."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _valid_metadata() -> dict:
 
 
 class TestValidateEvaluationMetadata:
-    """validate_evaluation_metadata enforces the phase-0 shape contract."""
+    """validate_evaluation_metadata enforces the stage-0 shape contract."""
 
     def test_valid_payload_with_required_slice_scores(self) -> None:
         errors = validate_evaluation_metadata(

@@ -8,20 +8,40 @@ import pytest
 liq_ta = pytest.importorskip("liq_ta")
 
 from liq.evolution.primitives.indicators_liq_ta import (  # noqa: E402
-    _PARAM_RANGES,
-    LiqTAIndicatorBackend,
+    _build_primitive_name,
+    _backend_candlestick_patterns,
+    _backend_indicators,
+    _canonical_output_suffixes,
+    _canonical_param_name,
+    _candidate_name_aliases,
+    _candidate_output_aliases,
+    _coerce_discrete_default,
     _coerce_output,
+    _legacy_output_suffix,
+    LiqTAIndicatorBackend,
+    LiqFeaturesBackend,
+    _make_param_specs_from_metadata,
     _make_multi_output_callable,
+    _make_cached_indicator_callable,
     _make_single_output_callable,
+    _make_candlestick_callable,
+    _normalize_indicator_name,
     register_liq_ta_indicators,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry  # noqa: E402
 from liq.gp.types import BoolSeries, Series  # noqa: E402
+from types import SimpleNamespace
+from typing import Any
 
 
 @pytest.fixture
 def backend() -> LiqTAIndicatorBackend:
     return LiqTAIndicatorBackend()
+
+
+@pytest.fixture
+def features_backend() -> LiqFeaturesBackend:
+    return LiqFeaturesBackend()
 
 
 @pytest.fixture
@@ -122,7 +142,7 @@ class TestRegistration:
     def test_sma_registered(self, backend: LiqTAIndicatorBackend) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        sma = reg.get("ta_sma")
+        sma = reg.get("sma")
         assert sma.output_type == Series
         assert sma.arity == 1
         assert len(sma.param_specs) == 1
@@ -131,7 +151,7 @@ class TestRegistration:
     def test_rsi_registered(self, backend: LiqTAIndicatorBackend) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        rsi = reg.get("ta_rsi")
+        rsi = reg.get("rsi")
         assert rsi.output_type == Series
 
     def test_macd_split_into_outputs(
@@ -141,9 +161,9 @@ class TestRegistration:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
         # MACD should produce 3 primitives
-        macd_line = reg.get("ta_macd_macd_line")
-        signal = reg.get("ta_macd_signal_line")
-        histogram = reg.get("ta_macd_histogram")
+        macd_line = reg.get("macd_macd_line")
+        signal = reg.get("macd_signal_line")
+        histogram = reg.get("macd_histogram")
         assert macd_line.output_type == Series
         assert signal.output_type == Series
         assert histogram.output_type == Series
@@ -151,9 +171,9 @@ class TestRegistration:
     def test_bollinger_split(self, backend: LiqTAIndicatorBackend) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        upper = reg.get("ta_bollinger_upper")
-        middle = reg.get("ta_bollinger_middle")
-        lower = reg.get("ta_bollinger_lower")
+        upper = reg.get("bollinger_upper")
+        middle = reg.get("bollinger_middle")
+        lower = reg.get("bollinger_lower")
         assert upper.output_type == Series
         assert middle.output_type == Series
         assert lower.output_type == Series
@@ -164,14 +184,14 @@ class TestRegistration:
     ) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        doji = reg.get("ta_cdl_doji")
+        doji = reg.get("cdl_doji")
         assert doji.output_type == BoolSeries
         assert doji.arity == 4  # open, high, low, close
 
     def test_sma_golden_value(self, backend: LiqTAIndicatorBackend) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        sma = reg.get("ta_sma")
+        sma = reg.get("sma")
         data = np.arange(1.0, 11.0)
         result = sma.callable(data, period=5)
         # SMA(5) at bar 4: mean(1,2,3,4,5) = 3.0
@@ -185,7 +205,7 @@ class TestRegistration:
         """Candlestick output should be float64 even though Rust returns i32."""
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        doji = reg.get("ta_cdl_doji")
+        doji = reg.get("cdl_doji")
         n = 50
         rng = np.random.default_rng(42)
         close = 100.0 + np.cumsum(rng.standard_normal(n))
@@ -194,6 +214,182 @@ class TestRegistration:
         low = close - rng.uniform(0, 2, n)
         result = doji.callable(open_, high, low, close)
         assert result.dtype == np.float64
+
+
+class TestRegistrationCanonicalNames:
+    """Canonical registration expectations."""
+
+    def test_single_output_uses_canonical_name(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+
+        rsi_canonical = reg.get("rsi")
+
+        sample = np.arange(1.0, 6.0)
+        canonical_out = rsi_canonical.callable(sample, period=14)
+
+        assert canonical_out.shape == sample.shape
+
+    def test_multi_output_uses_canonical_names(
+        self,
+        backend: LiqTAIndicatorBackend,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
+
+        macd_signal = reg.get("macd_signal")
+        macd_signal_line = reg.get("macd_signal_line")
+
+        sample = np.arange(1.0, 12.0)
+        signal = macd_signal.callable(sample, 12, 26, 9)
+        signal_line = macd_signal_line.callable(sample, 12, 26, 9)
+
+        np.testing.assert_array_equal(signal, signal_line)
+
+
+class TestLiqFeaturesBackend:
+    """Direct tests for LiqFeaturesBackend behavior."""
+
+    def test_list_indicators_contains_expected(
+        self,
+        features_backend: LiqFeaturesBackend,
+    ) -> None:
+        indicators = features_backend.list_indicators()
+        assert "rsi" in indicators
+        assert "macd" in indicators
+        assert "sma" in indicators
+
+    def test_compute_requires_supported_output_names(
+        self,
+        features_backend: LiqFeaturesBackend,
+        sample_data: dict,
+    ) -> None:
+        rsi = features_backend.compute("rsi", {"period": 14}, sample_data)
+        macd_signal = features_backend.compute(
+            "macd",
+            {"fast_period": 12, "slow_period": 26, "signal_period": 9},
+            sample_data,
+            output_index=1,
+        )
+        assert rsi.shape == (100,)
+        assert macd_signal.shape == (100,)
+        assert rsi.dtype == np.float64
+
+    def test_compute_with_unknown_indicator_raises(self) -> None:
+        backend = LiqFeaturesBackend()
+        with pytest.raises(ValueError, match="Unknown indicator: not_a_real_indicator"):
+            backend.compute("not_a_real_indicator", {}, {"close": np.arange(10.0)})
+
+    def test_compute_rejects_unsupported_kwargs(self) -> None:
+        backend = LiqFeaturesBackend()
+        with pytest.raises(TypeError, match="Unsupported kwargs"):
+            backend.compute("rsi", {"period": 14}, {"close": np.arange(10.0)}, bad=True)
+
+    def test_compute_with_out_buffer(
+        self,
+        sample_data: dict[str, np.ndarray],
+    ) -> None:
+        backend = LiqFeaturesBackend()
+        output = np.empty(len(sample_data["close"]), dtype=np.float64)
+        result = backend.compute(
+            "rsi",
+            {"period": 14},
+            sample_data,
+            out=output,
+        )
+        assert result is output
+
+    def test_list_indicators_category_filter(self) -> None:
+        backend = LiqFeaturesBackend()
+        by_group = backend.list_indicators(category="trend")
+        assert isinstance(by_group, list)
+
+    def test_candlestick_registration_only_uses_available_liq_features_names(self) -> None:
+        backend = LiqFeaturesBackend()
+        patterns = _backend_candlestick_patterns(backend)
+        available = set(backend.list_indicators())
+        assert set(patterns).issubset(available)
+
+    def test_indicator_backend_normalize_length_without_close(self) -> None:
+        assert LiqFeaturesBackend._normalize_length({"data": np.arange(5.0)}) == 5
+
+    def test_align_output_branches(self) -> None:
+        target = 6
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(np.array([1.0, 2.0]), None, target),
+            np.array([np.nan, np.nan, np.nan, np.nan, 1.0, 2.0]),
+        )
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(
+                np.array([1.0, 2.0, 3.0, 4.0]),
+                None,
+                3,
+            ),
+            np.array([1.0, 2.0, 3.0]),
+        )
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(
+                np.array([9.0, 10.0]),
+                np.array([], dtype=int),
+                4,
+            ),
+            np.array([np.nan, np.nan, 9.0, 10.0]),
+        )
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(
+                np.array([3.0, 4.0]),
+                np.array([4, 1], dtype=np.int64),
+                6,
+            ),
+            np.array([np.nan, 4.0, np.nan, np.nan, 3.0, np.nan]),
+        )
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(
+                np.array([6.0, 7.0]),
+                np.array([4.0, 1.0], dtype=np.float64),
+                2,
+            ),
+            np.array([6.0, 7.0]),
+        )
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(
+                np.array([2.0, 5.0, 7.0]),
+                np.array([10.0, 11.0, 12.0], dtype=np.float64),
+                2,
+            ),
+            np.array([5.0, 7.0]),
+        )
+
+
+class TestParamSpecsFromMetadata:
+    """ParamSpec generation from metadata."""
+
+    def test_metadata_param_grid_lookup_by_indicator_name(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+
+        def _fake_get_param_grid(name: str) -> dict[str, list[int]]:
+            calls.append(name)
+            return {"period": [2, 3, 5, 8]}
+
+        monkeypatch.setattr(
+            "liq.features.indicators.param_grids.get_param_grid",
+            _fake_get_param_grid,
+        )
+
+        specs = _make_param_specs_from_metadata(
+            {"name": "rsi", "default_params": {"period": 14}}
+        )
+
+        assert calls == ["rsi"]
+        assert len(specs) == 1
+        assert specs[0].name == "period"
+        assert specs[0].allowed_values == [2, 3, 5, 8]
 
 
 class TestCoerceOutput:
@@ -214,6 +410,298 @@ class TestCoerceOutput:
         result = _coerce_output(data, out=buf)
         assert result is buf
         np.testing.assert_array_equal(buf, [1.0, 2.0, 3.0])
+
+
+class TestIndicatorHelperFunctions:
+    """Unit tests for internal helper behavior."""
+
+    def test_legacy_output_suffixes(self) -> None:
+        assert _legacy_output_suffix("macd", "histogram") == "histogram"
+        assert _legacy_output_suffix("bollinger", "upper") == "upperband"
+        assert _legacy_output_suffix("bollinger", "middle") == "middleband"
+        assert _legacy_output_suffix("aroon", "aroon_up") == "aroonup"
+        assert _legacy_output_suffix("aroon", "aroon_down") == "aroondown"
+        assert _legacy_output_suffix("rsi", "value") == "value"
+
+    def test_canonical_output_suffixes(self) -> None:
+        assert _canonical_output_suffixes("bollinger", "upper") == {
+            "upper",
+            "upperband",
+        }
+        assert _canonical_output_suffixes("macd", "macd") == {"macd", "macd_line"}
+        assert _canonical_output_suffixes("bollinger", "middle") == {
+            "middle",
+            "middleband",
+        }
+        assert _canonical_output_suffixes("bollinger", "lower") == {
+            "lower",
+            "lowerband",
+        }
+        assert _canonical_output_suffixes("stochastic", "k") == {
+            "k",
+            "fastk",
+            "slowk",
+            "stoch_k",
+            "slowk",
+        }
+        assert _canonical_output_suffixes("stochastic", "d") == {
+            "d",
+            "fastd",
+            "slowd",
+            "stoch_d",
+            "slowd",
+        }
+        assert _canonical_output_suffixes("sma", "real") == {"real", "value"}
+        assert _canonical_output_suffixes("aroon", "aroon_down") == {
+            "aroon_down",
+            "aroondown",
+        }
+
+    def test_alias_builders(self) -> None:
+        assert _candidate_name_aliases("ta_sma") == ["sma"]
+        assert _candidate_name_aliases("macd_signal") == ["macd_signal"]
+        assert _candidate_name_aliases("foo_foo_bar") == [
+            "foo_bar",
+            "foo_foo_bar",
+        ]
+        assert _candidate_output_aliases("macd", "signal") == sorted(
+            {"signal", "signal_line"}
+        )
+        assert _build_primitive_name("macd", "signal_line") == "macd_signal_line"
+        assert _build_primitive_name("macd", None) == "macd"
+
+    def test_backend_helper_fallbacks(self) -> None:
+        assert isinstance(
+            _backend_indicators(SimpleNamespace()),
+            dict,
+        )
+        assert _backend_candlestick_patterns(SimpleNamespace(_candlestick_patterns=[])) == []
+        nested = SimpleNamespace(_backend=SimpleNamespace())
+        assert isinstance(_backend_candlestick_patterns(nested), list)
+        assert len(_backend_candlestick_patterns(nested)) > 0
+
+    def test_canonical_param_name(self) -> None:
+        assert _canonical_param_name("timeperiod3") == "period3"
+        assert _canonical_param_name("SLOWPERIOD") == "slow_period"
+        assert _canonical_param_name("custom") == "custom"
+
+    def test_coerce_discrete_default(self) -> None:
+        assert _coerce_discrete_default(14, [14, 20, 30]) == 14
+        assert _coerce_discrete_default("x", [2, 4, 6]) == 2
+        assert _coerce_discrete_default(9, [2, 4, 6]) == 6
+
+    def test_make_param_specs_from_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _fake_grid(name: str) -> dict[str, list[int]]:
+            return {"period": [2, 3, 5, 8]}
+
+        monkeypatch.setattr(
+            "liq.features.indicators.param_grids.get_param_grid",
+            _fake_grid,
+            raising=False,
+        )
+
+        specs = _make_param_specs_from_metadata(
+            {"name": "rsi", "default_params": {"timeperiod": 14}}
+        )
+        assert specs
+        assert len(specs) == 1
+        assert specs[0].name == "period"
+        assert 2 in specs[0].allowed_values
+        assert 8 in specs[0].allowed_values
+
+    def test_make_param_specs_from_metadata_supports_discrete_grid(self) -> None:
+        specs = _make_param_specs_from_metadata(
+            {
+                "name": "rsi",
+                "default_params": {"timeperiod": 14},
+                "parameters": {"timeperiod": 14},
+            }
+        )
+        assert len(specs) == 1
+        assert specs[0].name == "period"
+        assert specs[0].allowed_values is not None
+        assert specs[0].default in specs[0].allowed_values
+
+    def test_make_param_specs_from_metadata_falls_back_to_range(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _fake_grid(name: str) -> dict[str, list[int]]:
+            return {"period": []}
+
+        monkeypatch.setattr(
+            "liq.features.indicators.param_grids.get_param_grid",
+            _fake_grid,
+            raising=False,
+        )
+
+        specs = _make_param_specs_from_metadata(
+            {"name": "sma", "default_params": {"period": 14}, "params": ["period"]}
+        )
+        assert specs
+        assert specs[0].name == "period"
+        assert specs[0].allowed_values is None
+
+    def test_make_param_specs_from_metadata_skips_bool_defaults(self) -> None:
+        specs = _make_param_specs_from_metadata(
+            {"name": "sma", "default_params": {"period": True}}
+        )
+        assert specs == []
+
+
+class TestCallableFactories:
+    """Unit tests for internal callable factories."""
+
+    def test_single_output_wrapper_branches(self) -> None:
+        out = np.zeros(3, dtype=float)
+        base = np.array([1.0, 2.0, 3.0])
+
+        def _writer(a: np.ndarray, out: np.ndarray | None = None) -> None:
+            if out is not None:
+                out[:] = a * 2
+                return None
+            return a * 2
+
+        direct = _make_single_output_callable(_writer, 1, supports_out=True)
+        np.testing.assert_array_equal(direct(base, out=out), [2.0, 4.0, 6.0])
+
+        def _fn(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+            return a + b
+
+        wrapped_two = _make_single_output_callable(_fn, 2, supports_out=False)
+        np.testing.assert_array_equal(
+            wrapped_two(np.array([1.0, 1.0]), np.array([2.0, 3.0])),
+            np.array([3.0, 4.0]),
+        )
+
+        def _fn_three(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
+            return a + b + c
+
+        wrapped_three = _make_single_output_callable(_fn_three, 3, supports_out=False)
+        np.testing.assert_array_equal(
+            wrapped_three(
+                np.array([1.0, 1.0]),
+                np.array([2.0, 2.0]),
+                np.array([3.0, 3.0]),
+            ),
+            np.array([6.0, 6.0]),
+        )
+
+        def _fn_four(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> np.ndarray:
+            return a + b + c + d
+
+        wrapped_four = _make_single_output_callable(_fn_four, 4, supports_out=False)
+        np.testing.assert_array_equal(
+            wrapped_four(
+                np.array([1.0, 1.0]),
+                np.array([2.0, 2.0]),
+                np.array([3.0, 3.0]),
+                np.array([4.0, 4.0]),
+            ),
+            np.array([10.0, 10.0]),
+        )
+
+    def test_multi_output_wrapper_branches(self) -> None:
+        def _fn(a: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            return a, a * 2
+
+        wrapped_single = _make_multi_output_callable(_fn, 1, 1)
+        np.testing.assert_array_equal(
+            wrapped_single(np.array([1.0, 2.0])), np.array([2.0, 4.0])
+        )
+
+        def _fn4(
+            a: np.ndarray,
+            b: np.ndarray,
+            c: np.ndarray,
+            d: np.ndarray,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return a + b + c + d, a
+
+        wrapped_else = _make_multi_output_callable(_fn4, 4, 0)
+        np.testing.assert_array_equal(
+            wrapped_else(
+                np.array([1.0]),
+                np.array([1.0]),
+                np.array([1.0]),
+                np.array([1.0]),
+            ),
+            np.array([4.0]),
+        )
+
+    def test_candlestick_wrapper(self) -> None:
+        def _fn(
+            open_: np.ndarray,
+            high: np.ndarray,
+            low: np.ndarray,
+            close: np.ndarray,
+        ) -> np.ndarray:
+            return np.asarray(open_) + (np.asarray(high) - np.asarray(low)) - close
+
+        wrapped = _make_candlestick_callable(_fn)
+        sample = np.array([1.0, 2.0, 3.0])
+        result = wrapped(sample, sample, sample, sample)
+        assert result.dtype == np.float64
+
+    def test_cached_indicator_callable_positional_params_and_errors(
+        self,
+    ) -> None:
+        class Backend:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any], dict[str, np.ndarray], Any]] = []
+
+            def compute(
+                self,
+                name: str,
+                params: dict[str, Any],
+                data: dict[str, np.ndarray],
+                **kwargs: Any,
+            ) -> np.ndarray:
+                if name == "insufficient":
+                    raise ValueError("insufficient data for indicator")
+                self.calls.append((name, params, data, kwargs))
+                return np.asarray(data["a"]) * 2
+
+        backend = Backend()
+        wrapper = _make_cached_indicator_callable(
+            backend,
+            "ok",
+            ["a"],
+            0,
+            param_names=["multiplier", "other"],
+        )
+
+        input_data = np.array([1.0, 2.0, 3.0])
+        output = wrapper(input_data, 2, 7)
+        assert len(backend.calls) == 1
+        assert backend.calls[0][1] == {"multiplier": 2, "other": 7}
+        np.testing.assert_array_equal(output, np.array([2.0, 4.0, 6.0]))
+
+        with pytest.raises(TypeError, match="expects at least"):
+            _make_cached_indicator_callable(backend, "ok", ["a", "b"], 0)(input_data)
+
+        short = _make_cached_indicator_callable(backend, "insufficient", ["a"], 0)
+        result = short(np.array([1.0, 2.0]))
+        assert np.isnan(result).all()
+
+        out = np.zeros(2, dtype=float)
+        result_with_out = short(np.array([1.0, 2.0]), out=out)
+        np.testing.assert_array_equal(result_with_out, out)
+        assert np.isnan(out).all()
+
+    def test_backend_helpers_and_normalization(self) -> None:
+        source = {"a": {"inputs": ["a"], "outputs": ["value"]}}
+        direct = SimpleNamespace(_indicators=source, _candlestick_patterns=[])
+        nested = SimpleNamespace(_backend=direct)
+
+        assert _backend_indicators(direct) == source
+        assert _backend_indicators(nested) == source
+        assert _normalize_indicator_name("TA_TEST") == "test"
+        assert _backend_candlestick_patterns(direct) == []
+        assert _backend_candlestick_patterns(nested) == []
 
     def test_no_buffer_returns_array(self) -> None:
         data = [1, 2, 3]
@@ -480,10 +968,9 @@ class TestComputeEdgeCases:
     """Test compute() edge cases in LiqTAIndicatorBackend."""
 
     def test_unknown_indicator_raises(self, backend: LiqTAIndicatorBackend) -> None:
-        # Use a name that exists as a liq_ta attribute but is not
-        # a registered indicator nor a candlestick pattern.
+        # Use a name that exists in liq_ta but is not a registered indicator.
         with pytest.raises(ValueError, match="Unknown indicator"):
-            backend.compute("get_indicator_info", {}, {})
+            backend.compute("get_indicator_registry", {}, {})
 
     def test_compute_with_supports_out(
         self,
@@ -500,31 +987,41 @@ class TestComputeEdgeCases:
 
 
 class TestAllIndicatorsRegistered:
-    """Verify every indicator in liq_ta.INDICATORS produces ta_* primitives."""
+    """Verify every indicator in liq_ta.INDICATORS produces canonical primitives."""
 
     def test_all_liq_ta_indicators_registered(
         self,
         backend: LiqTAIndicatorBackend,
     ) -> None:
-        """Every indicator in liq_ta.INDICATORS must produce at least one ta_* primitive."""
+        """Every indicator in liq_ta.INDICATORS must produce at least one primitive."""
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        registered_names = {p.name for p in reg.list_primitives(category="indicator")}
+        registered_names = {
+            name
+            for name, primitive in reg._primitives.items()
+            if primitive.category == "indicator"
+        }
 
         missing = []
         for name, meta in liq_ta.INDICATORS.items():
             outputs = meta["outputs"]
             if len(outputs) == 1:
-                expected = f"ta_{name}"
+                expected = name
                 if expected not in registered_names:
                     missing.append(expected)
             else:
                 for out_name in outputs:
-                    expected = f"ta_{name}_{out_name}"
+                    expected = f"{name}_{out_name}"
                     if expected not in registered_names:
                         missing.append(expected)
 
         assert missing == [], f"Missing primitives: {missing}"
+
+    def test_align_output_returns_nan_for_empty_values(self) -> None:
+        np.testing.assert_array_equal(
+            LiqFeaturesBackend._align_output(np.array([]), None, 4),
+            np.array([np.nan, np.nan, np.nan, np.nan]),
+        )
 
     def test_rust_only_indicators_now_visible(self) -> None:
         """Indicators from the Rust registry should now be in liq_ta.INDICATORS."""
@@ -564,7 +1061,7 @@ class TestNewlyAddedIndicators:
     def test_hma_registered(self, backend: LiqTAIndicatorBackend) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        hma = reg.get("ta_hma")
+        hma = reg.get("hma")
         assert hma.output_type == Series
         assert hma.arity == 1  # single input: data
         assert len(hma.param_specs) == 1
@@ -576,7 +1073,7 @@ class TestNewlyAddedIndicators:
     ) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        st = reg.get("ta_supertrend_supertrend")
+        st = reg.get("supertrend_supertrend")
         assert st.output_type == Series
         assert st.arity == 3  # high, low, close
         # Check multiplier param is present
@@ -590,8 +1087,8 @@ class TestNewlyAddedIndicators:
     ) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        plus_vi = reg.get("ta_vortex_plus_vi")
-        minus_vi = reg.get("ta_vortex_minus_vi")
+        plus_vi = reg.get("vortex_plus_vi")
+        minus_vi = reg.get("vortex_minus_vi")
         assert plus_vi.output_type == Series
         assert minus_vi.output_type == Series
         assert plus_vi.arity == 3
@@ -602,7 +1099,7 @@ class TestNewlyAddedIndicators:
     ) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        crsi = reg.get("ta_connors_rsi")
+        crsi = reg.get("connors_rsi")
         param_names = [p.name for p in crsi.param_specs]
         assert "rsi_period" in param_names
         assert "streak_period" in param_names
@@ -614,7 +1111,7 @@ class TestNewlyAddedIndicators:
     ) -> None:
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        lrsi = reg.get("ta_laguerre_rsi")
+        lrsi = reg.get("laguerre_rsi")
         param_names = [p.name for p in lrsi.param_specs]
         assert "gamma" in param_names
         gamma_spec = next(p for p in lrsi.param_specs if p.name == "gamma")
@@ -622,18 +1119,45 @@ class TestNewlyAddedIndicators:
         assert gamma_spec.min_value == 0.01
         assert gamma_spec.max_value == 0.99
 
+    def test_autocorr_lag_is_registered_as_int_and_accepts_float_input(
+        self,
+        backend: LiqTAIndicatorBackend,
+        sample_data: dict,
+    ) -> None:
+        reg = PrimitiveRegistry()
+        register_liq_ta_indicators(reg, backend)
 
-class TestParamRangesCoverage:
+        autocorr = reg.get("autocorr")
+        lag_spec = next((p for p in autocorr.param_specs if p.name == "lag"), None)
+        assert lag_spec is not None
+        assert lag_spec.dtype is int
+
+        result = autocorr.callable(sample_data["data"], lag=5.0)
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.float64
+        assert len(result) == len(sample_data["data"])
+
+
+class TestParamCoverage:
     """Verify no indicator params are silently dropped."""
 
-    def test_param_ranges_cover_all_params(self) -> None:
-        """Every param in every indicator's metadata must have a _PARAM_RANGES entry."""
+    def test_params_registered_for_each_indicator(self) -> None:
+        """Each indicator metadata parameter is represented in registered primitives."""
         missing = []
         for name, meta in liq_ta.INDICATORS.items():
+            metadata = {
+                "name": name,
+                "params": list(meta["params"]),
+            }
+            specs = _make_param_specs_from_metadata(metadata)
+            spec_names = {spec.name for spec in specs}
+
             for param in meta["params"]:
-                if param not in _PARAM_RANGES:
-                    missing.append(f"{name}.{param}")
-        assert missing == [], f"Params missing from _PARAM_RANGES: {missing}"
+                canonical = _canonical_param_name(param)
+                if canonical and canonical in spec_names:
+                    continue
+                missing.append(f"{name}.{param}")
+        assert missing == []
 
     def test_existing_indicator_params_not_dropped(
         self,
@@ -644,7 +1168,7 @@ class TestParamRangesCoverage:
         register_liq_ta_indicators(reg, backend)
 
         # Ichimoku has 4 params and 5 outputs
-        tenkan = reg.get("ta_ichimoku_tenkan")
+        tenkan = reg.get("ichimoku_tenkan")
         ichimoku_params = [p.name for p in tenkan.param_specs]
         assert "tenkan_period" in ichimoku_params
         assert "kijun_period" in ichimoku_params
@@ -652,13 +1176,13 @@ class TestParamRangesCoverage:
         assert "displacement" in ichimoku_params
 
         # Keltner channel has 2 params
-        kc_upper = reg.get("ta_keltner_channel_upper")
+        kc_upper = reg.get("keltner_channel_upper")
         kc_params = [p.name for p in kc_upper.param_specs]
         assert "period" in kc_params
         assert "atr_multiplier" in kc_params
 
         # QQE has 4 params
-        qqe = reg.get("ta_qqe_qqe")
+        qqe = reg.get("qqe_qqe")
         qqe_params = [p.name for p in qqe.param_specs]
         assert "rsi_period" in qqe_params
         assert "smoothing_period" in qqe_params
@@ -677,7 +1201,7 @@ class TestNewIndicatorGoldenValues:
         """HMA should produce finite values for sufficient data."""
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        hma = reg.get("ta_hma")
+        hma = reg.get("hma")
         result = hma.callable(sample_data["data"], period=9)
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float64
@@ -693,7 +1217,7 @@ class TestNewIndicatorGoldenValues:
         """ConnorsRSI values should be bounded [0, 100]."""
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        crsi = reg.get("ta_connors_rsi")
+        crsi = reg.get("connors_rsi")
         # ConnorsRSI with rank_period=50 requires >= 51 data points
         rng = np.random.default_rng(42)
         data = 100.0 + np.cumsum(rng.standard_normal(200))
@@ -717,7 +1241,7 @@ class TestNewIndicatorGoldenValues:
         """Supertrend should produce finite values."""
         reg = PrimitiveRegistry()
         register_liq_ta_indicators(reg, backend)
-        st = reg.get("ta_supertrend_supertrend")
+        st = reg.get("supertrend_supertrend")
         result = st.callable(
             sample_data["high"],
             sample_data["low"],
