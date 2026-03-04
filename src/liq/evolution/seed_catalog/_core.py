@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-import math
 
 from liq.evolution.errors import ConfigurationError
-from liq.evolution.protocols import PrimitiveRegistry
 from liq.evolution.program import (
     Program,
     TerminalNode,
 )
+from liq.evolution.protocols import PrimitiveRegistry
 from liq.gp.types import Series
 
 
@@ -110,6 +110,41 @@ def _resolve_primitive(
     seed: str,
 ):
     """Resolve a primitive from the registry with clear context on failure."""
+    legacy_aliases: dict[str, tuple[str, ...]] = {
+        "ta_macd_macd_line": ("ta_macd_macd", "macd_macd"),
+        "macd_macd_line": ("ta_macd_macd", "macd_macd"),
+        "ta_macd_signal_line": ("ta_macd_signal", "macd_signal"),
+        "macd_signal_line": ("ta_macd_signal", "macd_signal"),
+        "ta_stochastic_k": (
+            "ta_stochastic_slow_k",
+            "stochastic_slow_k",
+            "ta_stochastic_fast_k",
+            "stochastic_fast_k",
+            "stochastic_fastk",
+        ),
+        "stochastic_k": (
+            "ta_stochastic_slow_k",
+            "stochastic_slow_k",
+            "ta_stochastic_fast_k",
+            "stochastic_fast_k",
+            "stochastic_fastk",
+        ),
+        "ta_stochastic_d": (
+            "ta_stochastic_slow_d",
+            "stochastic_slow_d",
+            "ta_stochastic_fast_d",
+            "stochastic_fast_d",
+            "stochastic_d",
+        ),
+        "stochastic_d": (
+            "ta_stochastic_slow_d",
+            "stochastic_slow_d",
+            "ta_stochastic_fast_d",
+            "stochastic_fast_d",
+            "stochastic_d",
+        ),
+    }
+
     def _candidate_primitive_names(requested: str) -> list[str]:
         lowered = requested.lower()
         candidates: list[str] = []
@@ -164,6 +199,13 @@ def _resolve_primitive(
 
         if lowered not in seen:
             normalized.append(lowered)
+
+        # Backward-compatible aliases for indicator primitive naming changes.
+        for candidate in list(normalized):
+            for alias in legacy_aliases.get(candidate, ()):
+                if alias not in seen:
+                    seen.add(alias)
+                    normalized.append(alias)
         return normalized
 
     requested = _candidate_primitive_names(name)
