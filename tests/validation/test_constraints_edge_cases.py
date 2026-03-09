@@ -26,7 +26,7 @@ def _program() -> TerminalNode:
 class _BadFloat(int):
     """Type that is isinstance(int) but cannot convert via float()."""
 
-    def __float__(self) -> float:  # type: ignore[override]
+    def __float__(self) -> float:
         raise TypeError("cannot coerce")
 
 

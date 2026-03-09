@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "liq-gp>=0.1.2",
     "liq-core>=0.1.1",
+    "liq-datasets>=0.1.3",
     "liq-sim>=0.1.1",
     "liq-features>=0.1.1",
     "liq-signals>=0.1.1",
@@ -69,6 +70,7 @@ dev = [
 liq-gp = { path = "../liq-gp", editable = true }
 liq-ta = { path = "../liq-ta/crates/liq-ta-python", editable = true }
 liq-features = { path = "../liq-features", editable = true }
+liq-datasets = { path = "../liq-datasets", editable = true }
 liq-core = { path = "../liq-core", editable = true }
 liq-sim = { path = "../liq-sim", editable = true }
 liq-signals = { path = "../liq-signals", editable = true }
@@ -115,6 +117,7 @@ indent-style = "space"
 extra-paths = [
     "./src",
     "../liq-core/src",
+    "../liq-datasets/src",
     "../liq-sim/src",
     "../liq-gp/src",
     "../liq-signals/src",

@@ -25,7 +25,7 @@ def safe_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def safe_div(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Element-wise division; division by zero produces NaN."""
-    with np.errstate(divide="ignore", invalid="ignore"):
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
         result = np.divide(a, b)
     result = np.where(np.isfinite(result), result, np.nan)
     return result
@@ -48,10 +48,16 @@ def safe_clip(data: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 
 def safe_zscore(a: np.ndarray) -> np.ndarray:
     """Z-score normalization; zero-variance series returns zeros."""
-    std = np.std(a)
-    if std == 0.0:
+    if a.size == 0:
+        # Empty inputs are valid during some GP evaluations; avoid numpy empty-slice warnings.
         return np.zeros_like(a)
-    return (a - np.mean(a)) / std
+    with np.errstate(over="ignore", invalid="ignore"):
+        std = np.std(a)
+    if std == 0.0 or not np.isfinite(std):
+        return np.zeros_like(a)
+    with np.errstate(over="ignore", invalid="ignore"):
+        z = (a - np.mean(a)) / std
+    return np.where(np.isfinite(z), z, np.nan)
 
 
 def safe_log(a: np.ndarray) -> np.ndarray:

@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import builtins
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
-from liq.evolution.artifacts import DependencyFingerprint, EvolutionRunArtifact, RejectionEvent
+from liq.evolution.artifacts import (
+    DependencyFingerprint,
+    EvolutionRunArtifact,
+    RejectionEvent,
+)
 from liq.evolution.errors import AdapterError
 
 
@@ -66,7 +73,7 @@ def test_bridge_migrates_legacy_payload_from_liq_store_backend() -> None:
     assert loaded.selected_candidate_ids == ("cand-legacy",)
 
 
-def test_bridge_data_root_mode_uses_liq_store_local_backend(tmp_path) -> None:  # type: ignore[annotation-unchecked]
+def test_bridge_data_root_mode_uses_liq_store_local_backend(tmp_path: Path) -> None:
     bridge = LiqStoreEvolutionArtifactStore(data_root=tmp_path)
     artifact = EvolutionRunArtifact(
         run_id="run-local",
@@ -87,10 +94,16 @@ def test_bridge_requires_backend_or_data_root() -> None:
 def test_bridge_artifact_key_fallback_when_liq_store_unavailable(monkeypatch) -> None:
     real_import = builtins.__import__
 
-    def _blocked(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def _blocked(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> Any:
         if name == "liq.store":
             raise ImportError("blocked")
-        return real_import(name, *args, **kwargs)
+        return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _blocked)
     assert (
@@ -102,10 +115,16 @@ def test_bridge_artifact_key_fallback_when_liq_store_unavailable(monkeypatch) ->
 def test_bridge_save_and_load_fallback_without_schema_helpers(monkeypatch) -> None:
     real_import = builtins.__import__
 
-    def _blocked(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def _blocked(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> Any:
         if name == "liq.store.artifacts":
             raise ImportError("blocked")
-        return real_import(name, *args, **kwargs)
+        return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _blocked)
     backend = _MemoryBackend()
@@ -143,7 +162,9 @@ def test_bridge_save_artifact_generic_payload_modes() -> None:
 
     assert bridge.load_artifact("model-dump") == {"k": "v"}
     assert bridge.load_artifact("payload-only") == {"payload": {"x": 1}}
-    assert "artifact" in bridge.load_artifact("plain")
+    plain = bridge.load_artifact("plain")
+    assert isinstance(plain, dict)
+    assert "artifact" in plain
 
 
 def test_bridge_save_run_artifact_redacts_sensitive_metadata() -> None:

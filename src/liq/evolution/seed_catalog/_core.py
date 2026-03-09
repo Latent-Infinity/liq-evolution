@@ -12,8 +12,11 @@ from liq.evolution.program import (
     Program,
     TerminalNode,
 )
-from liq.evolution.protocols import PrimitiveRegistry
+from liq.evolution.protocols import PrimitiveRegistry as PrimitiveRegistryProtocol
+from liq.gp.primitives.registry import PrimitiveRegistry as GPPrimitiveRegistry
 from liq.gp.types import Series
+
+PrimitiveRegistryLike = PrimitiveRegistryProtocol | GPPrimitiveRegistry
 
 
 class SeedTemplateRole(StrEnum):
@@ -42,7 +45,7 @@ class StrategySeedTemplate:
 
     name: str
     description: str
-    builder: Callable[[PrimitiveRegistry], Program]
+    builder: Callable[..., Program]
     block_role: SeedTemplateRole = SeedTemplateRole.expert
     arity: int = 1
     expected_inputs: tuple[str, ...] = ("close",)
@@ -104,7 +107,7 @@ def _terminal(name: str) -> TerminalNode:
 
 
 def _resolve_primitive(
-    registry: PrimitiveRegistry,
+    registry: PrimitiveRegistryLike,
     name: str,
     *,
     seed: str,

@@ -55,6 +55,7 @@ class TestWireObjectives:
         evaluator = wire_objectives(config, backtest_fn=mock_fn)
         assert isinstance(evaluator, TwoStageFitnessEvaluator)
         # Stage B should use the configured metric
+        assert evaluator._stage_b is not None
         assert evaluator._stage_b._metric == "sortino_ratio"
 
     def test_backtest_two_stage_uses_correct_top_n(self) -> None:

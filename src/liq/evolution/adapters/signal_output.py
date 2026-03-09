@@ -11,9 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-
 import polars as pl
-
 
 RegimeLabel = Literal["trend", "range", "neutral", "fallback", "no_trade", "empty"]
 

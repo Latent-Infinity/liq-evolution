@@ -64,6 +64,10 @@ def test_build_walk_forward_splits_anchored_regime() -> None:
     assert splits[2].train == slice(0, 12)
     assert splits[2].validate == slice(13, 15)
     assert splits[2].test == slice(16, 18)
+    assert isinstance(splits[0].validate, slice)
+    assert isinstance(splits[0].train, slice)
+    assert isinstance(splits[1].validate, slice)
+    assert isinstance(splits[1].train, slice)
     assert splits[0].validate.start == splits[0].train.stop + splits[0].embargo_bars
     assert splits[1].validate.start == splits[1].train.stop + splits[1].embargo_bars
 
@@ -252,7 +256,7 @@ def test_summarize_regime_participation_accepts_regime_mapping() -> None:
     splits = [
         WalkForwardSplit(train=slice(0, 4), validate=slice(4, 6), test=slice(6, 8)),
     ]
-    regime_series = {"0": "trend", "1": "trend", "2": "trend", "3": "trend", "4": "trend", "5": "range", "6": "trend", "7": "trend"}
+    regime_series = {0: "trend", 1: "trend", 2: "trend", 3: "trend", 4: "trend", 5: "range", 6: "trend", 7: "trend"}
 
     summaries = summarize_regime_participation(splits, regime_series)
 

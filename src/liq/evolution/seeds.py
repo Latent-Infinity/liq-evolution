@@ -23,6 +23,7 @@ from liq.evolution.seed_catalog import (
     StrategySeedTemplate,
     build_strategy_seed,
     build_strategy_seeds,
+    built_in_seed_payloads,
     get_seed_template,
     list_known_strategy_seeds,
     list_seed_templates_by_role,
@@ -229,7 +230,7 @@ def validate_external_seed_payload(
             if "schema_version" in entry and "program" in entry:
                 raw_program = entry
             else:
-                raw_program = entry["program"] if "program" in entry else entry
+                raw_program = entry.get("program", entry)
             if not isinstance(raw_program, Mapping):
                 raise ConfigurationError(
                     f"external seed entry at index {index} has invalid 'program' payload"
@@ -333,6 +334,7 @@ __all__ = [
     "StrategySeedTemplate",
     "build_strategy_seed",
     "build_strategy_seeds",
+    "built_in_seed_payloads",
     "get_seed_template",
     "list_known_strategy_seeds",
     "list_seed_templates_by_role",

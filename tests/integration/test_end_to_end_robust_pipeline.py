@@ -20,12 +20,12 @@ from liq.evolution.fitness.evaluation_schema import (
 from liq.evolution.fitness.multifidelity import MultiFidelityFitnessEvaluator
 from liq.evolution.primitives import prepare_evaluation_context
 from liq.evolution.primitives.registry import build_trading_registry
-from liq.evolution.qd.orchestrator import run_qd_evolution
+from liq.evolution.qd.orchestrator import QDEvolutionResult, run_qd_evolution
 from liq.gp.config import GPConfig as LiqGPConfig
 from liq.gp.evolution.qd_archive import QDArchive
 from liq.gp.program.ast import TerminalNode
 from liq.gp.program.eval import evaluate as evaluate_program
-from liq.gp.types import FitnessResult
+from liq.gp.types import FitnessResult, Series
 
 
 def _make_splits() -> list[WalkForwardSplit]:
@@ -168,7 +168,7 @@ def _make_lexicase_config(seed: int) -> LiqGPConfig:
     )
 
 
-def _run_qd(*, seed: int, coverage_weight: float, evaluator) -> tuple:
+def _run_qd(*, seed: int, coverage_weight: float, evaluator: Any) -> QDEvolutionResult:
     _make_splits()
     registry = build_trading_registry(PrimitiveConfig())
     config = _make_lexicase_config(seed=seed)
@@ -209,8 +209,8 @@ def test_end_to_end_lexicase_qd_multifidelity_pipeline() -> None:
         )
 
     mf_eval = _build_mf(1.0, adversarial=True)
-    level0 = mf_eval._levels[0]  # type: ignore[assignment]
-    level1 = mf_eval._levels[1]  # type: ignore[assignment]
+    level0 = mf_eval._levels[0]
+    level1 = mf_eval._levels[1]
     mf_result = _run_qd(seed=123, coverage_weight=0.8, evaluator=mf_eval)
 
     # Deterministic seed yields stable portfolio.
@@ -292,9 +292,9 @@ def test_coverage_pressure_prefers_underfilled_bins() -> None:
         objective_directions=["maximize"],
         bin_capacity=2,
     )
-    top_a = TerminalNode(name="top_a", output_type=float)
-    top_b = TerminalNode(name="top_b", output_type=float)
-    under = TerminalNode(name="under", output_type=float)
+    top_a = TerminalNode(name="top_a", output_type=Series)
+    top_b = TerminalNode(name="top_b", output_type=Series)
+    under = TerminalNode(name="under", output_type=Series)
 
     archive.insert(top_a, (1.0,), (0.08,))
     archive.insert(top_b, (1.0,), (0.08,))

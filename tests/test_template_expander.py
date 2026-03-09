@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from liq.evolution.config import PrimitiveConfig
-from liq.evolution.program import TerminalNode
 from liq.evolution.primitives.registry import build_trading_registry
+from liq.evolution.program import TerminalNode
 from liq.evolution.template_expander import (
     CFGLiteTemplateExpander,
     RegimeExpansionTrace,
@@ -27,7 +29,7 @@ class TestCFGLiteTemplateExpander:
         assert len(trace.expert_templates) == 2
         assert trace.risk_template is not None
 
-        program = compile_regime_model_to_program(model, registry)
+        program = compile_regime_model_to_program(cast(Any, model), registry)
         assert program.output_type is Series
 
     def test_expansion_is_deterministic_under_fixed_seed(self) -> None:

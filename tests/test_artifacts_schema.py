@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 
@@ -141,7 +141,7 @@ def test_evolution_run_artifact_from_payload_requires_migrator_for_legacy(monkey
 
     real_import = builtins.__import__
 
-    def _blocked(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def _blocked(name: str, *args, **kwargs):
         if name == "liq.store.artifacts":
             raise ImportError("blocked")
         return real_import(name, *args, **kwargs)

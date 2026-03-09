@@ -2,31 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
+from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
+from liq.evolution.errors import (
+    EvaluationContractError,
+    ProtocolVersionError,
+)
 from liq.evolution.protocols import (
+    EVOLUTION_PROTOCOL_VERSION,
+    GP_PROTOCOL_VERSION,
+    CandidateArtifact,
+    CandidateEvaluator,
+    EvolutionArtifactStore,
     FitnessEvaluator,
     FitnessStageEvaluator,
     GPStrategy,
     IndicatorBackend,
-    CandidateArtifact,
-    CandidateEvaluator,
-    EvolutionArtifactStore,
-    GP_PROTOCOL_VERSION,
+    PrimitiveRegistry,
     StrategyArtifact,
-    EVOLUTION_PROTOCOL_VERSION,
+    mask_sensitive_context,
     require_protocol_version,
     translate_protocol_exception,
-    mask_sensitive_context,
-    PrimitiveRegistry,
-)
-from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
-from liq.evolution.errors import (
-    ProtocolVersionError,
-    EvaluationContractError,
 )
 
 
@@ -151,7 +151,7 @@ class TestPrimitiveRegistryProtocol:
 
         reg = MinimalRegistry()
         # Call through the protocol default
-        assert PrimitiveRegistry.lookup(reg, "test") == "found:test"
+        assert PrimitiveRegistry.lookup(cast(PrimitiveRegistry, reg), "test") == "found:test"
 
 
 class TestCandidateProtocolContracts:
@@ -232,6 +232,7 @@ class TestProtocolHelpers:
             "model": "xgboost",
         }
         redacted = mask_sensitive_context(source)
+        assert redacted is not None
         assert redacted["api_key"] == "***REDACTED***"
         assert redacted["model"] == "xgboost"
 
@@ -267,5 +268,9 @@ class TestFitnessStageEvaluatorDefault:
                 return [1.0 for _ in programs]
 
         evaluator = MinimalEvaluator()
-        result = FitnessStageEvaluator.evaluate(evaluator, ["p1", "p2"], {})
+        result = FitnessStageEvaluator.evaluate(
+            cast(FitnessStageEvaluator, evaluator),
+            ["p1", "p2"],
+            {},
+        )
         assert result == [1.0, 1.0]

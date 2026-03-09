@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from liq.evolution.program import TerminalNode
@@ -49,7 +51,7 @@ class TestRegimeIdContracts:
 
     def test_invalid_regime_value_rejected(self) -> None:
         with pytest.raises(ValueError):
-            RegimeId("invalid")  # type: ignore[arg-type]
+            RegimeId("invalid")
 
 
 class TestRegimeWeightsContracts:
@@ -65,7 +67,7 @@ class TestRegimeWeightsContracts:
 
     def test_bool_weights_rejected(self) -> None:
         with pytest.raises(TypeError):
-            RegimeWeights((True,))  # type: ignore[arg-type]
+            RegimeWeights((True,))
 
     def test_negative_weights_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
@@ -128,7 +130,7 @@ class TestRegimeModelContracts:
             experts=(_expert("e1"),),
         )
         with pytest.raises(AttributeError):
-            model.detector = RegimeDetector(
+            cast(Any, model).detector = RegimeDetector(
                 RegimeId.trend,
                 TerminalNode(name="detector2", output_type=BoolSeries),
-            )  # type: ignore[misc]
+            )

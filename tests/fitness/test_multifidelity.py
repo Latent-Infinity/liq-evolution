@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any, cast
 
 import pytest
 
@@ -44,7 +45,7 @@ class _ScoreByProgramEvaluator:
                 "archive_bin": "default_bin",
                 "raw_objectives": objectives,
             }
-            metadata.update(self._metadata)
+            metadata.update(dict(self._metadata))
             results.append(FitnessResult(objectives=objectives, metadata=metadata))
         return results
 
@@ -744,9 +745,10 @@ class TestMultiFidelityEvaluation:
             objective_directions=("maximize",),
             promotion_strategy="direction_aware_first",
         )
-        no_promote_evaluator._select_by_direction_aware_first = (
-            lambda candidate_indices, _results, _budget: []
-        )  # type: ignore[method-assign]
+        no_promote_evaluator._select_by_direction_aware_first = cast(
+            Any,
+            lambda candidate_indices, _results, _budget: [],
+        )
         no_promote_evaluator.evaluate([0, 1], {})
 
     def test_scalarized_weight_shortfall_and_crowding_branches(self) -> None:

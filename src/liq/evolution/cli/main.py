@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, NoReturn
 
 from pydantic import ValidationError
 
 from liq.evolution.config import EvolutionConfig
 from liq.evolution.errors import ConfigurationError
-
 
 _SAFE_STAGE_A_BUDGET_LIMIT = 25_000
 
@@ -35,8 +35,15 @@ class _CliConfigError(Exception):
         self.context = dict(context or {})
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser variant that never writes raw usage/errors to stderr."""
+
+    def error(self, message: str) -> NoReturn:
+        raise argparse.ArgumentError(None, message)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         description="liquid evolution configuration and diagnostic CLI",
         exit_on_error=False,
     )

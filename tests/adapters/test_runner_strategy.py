@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -10,7 +11,7 @@ import polars as pl
 import pytest
 
 from liq.evolution.adapters.signal_output import GPSignalOutput
-from liq.evolution.config import ParallelConfig
+from liq.evolution.config import ParallelConfig, RegimeGateConfig, WarmStartConfig
 from liq.evolution.errors import AdapterError
 from liq.evolution.protocols import GPStrategy
 from liq.gp.program.ast import TerminalNode
@@ -482,7 +483,7 @@ class TestGPStrategyAdapterWarmStart:
 
         mock_evolve.return_value = _make_evolution_result(seed)
         evolution_config = EvolutionConfig(
-            warm_start={"seed_programs_path": path, "mode": "replace"}
+            warm_start=WarmStartConfig(seed_programs_path=path, mode="replace")
         )
         adapter = GPStrategyAdapter.from_evolution_config(
             PrimitiveRegistry(),
@@ -515,7 +516,7 @@ class TestGPStrategyAdapterWarmStart:
             _make_evolution_result(next_program),
         ]
         evolution_config = EvolutionConfig(
-            warm_start={"seed_programs_path": path, "mode": "augment"}
+            warm_start=WarmStartConfig(seed_programs_path=path, mode="augment")
         )
         adapter = GPStrategyAdapter.from_evolution_config(
             PrimitiveRegistry(),
@@ -549,7 +550,7 @@ class TestGPStrategyAdapterWarmStart:
 
         mock_evolve.return_value = _make_evolution_result(override_seed)
         evolution_config = EvolutionConfig(
-            warm_start={"seed_programs_path": path, "mode": "replace"}
+            warm_start=WarmStartConfig(seed_programs_path=path, mode="replace")
         )
         adapter = GPStrategyAdapter.from_evolution_config(
             PrimitiveRegistry(),
@@ -572,12 +573,12 @@ class TestGPStrategyAdapterWarmStart:
 
         mock_evolve.return_value = _make_evolution_result()
         evolution_config = EvolutionConfig(
-            regime={
-                "regime_confidence_threshold": 0.8,
-                "regime_occupancy_threshold": 0.2,
-                "regime_hysteresis_margin": 0.11,
-                "regime_min_persistence": 4,
-            }
+            regime=RegimeGateConfig(
+                regime_confidence_threshold=0.8,
+                regime_occupancy_threshold=0.2,
+                regime_hysteresis_margin=0.11,
+                regime_min_persistence=4,
+            )
         )
         adapter = GPStrategyAdapter.from_evolution_config(
             PrimitiveRegistry(),
@@ -672,7 +673,9 @@ class TestLoadSeedPrograms:
             path = tmp_path / "seed_programs.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
             loaded = _load_seed_programs(path, registry)
-            assert [program.name for program in loaded] == [seed.name]
+            assert all(isinstance(program, TerminalNode) for program in loaded)
+            loaded_nodes = [cast(TerminalNode, program) for program in loaded]
+            assert [program.name for program in loaded_nodes] == [seed.name]
 
     def test_load_seed_programs_handles_invalid_payloads(self, tmp_path) -> None:
         from liq.evolution.adapters.runner_strategy import _load_seed_programs

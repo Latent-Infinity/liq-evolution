@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -13,9 +14,9 @@ from liq.evolution.config import (
     FitnessConfig,
     FitnessStageConfig,
     GPConfig,
-    RegimeGateConfig,
     ParallelConfig,
     PrimitiveConfig,
+    RegimeGateConfig,
     SerializationConfig,
     WarmStartConfig,
 )
@@ -357,16 +358,16 @@ class TestGPConfig:
 
     def test_invalid_constant_opt_mode_rejected(self) -> None:
         with pytest.raises((ConfigurationError, ValidationError), match="constant_opt_mode"):
-            GPConfig(constant_opt_mode="bad")
+            GPConfig(constant_opt_mode=cast(Any, "bad"))
 
     def test_constant_opt_max_evals_rejects_nonpositive(self) -> None:
         with pytest.raises(ConfigurationError, match="constant_opt_max_evals"):
             GPConfig(constant_opt_max_evals=0)
 
     def test_constant_opt_mode_rejected_in_model_validator(self) -> None:
-        cfg = GPConfig.model_construct(constant_opt_mode="bad")
+        cfg = GPConfig.model_construct(constant_opt_mode=cast(Any, "bad"))
         with pytest.raises(ConfigurationError, match="constant_opt_mode"):
-            cfg._validate_gp_config()
+            cast(Any, GPConfig._validate_gp_config)(cfg)
 
 
 class TestFitnessConfig:
@@ -404,12 +405,18 @@ class TestFitnessConfig:
             (ConfigurationError, ValidationError),
             match=r"'maximize' or 'minimize'",
         ):
-            FitnessConfig(objectives=("f1",), objective_directions=("noop",))
+            FitnessConfig(
+                objectives=("f1",),
+                objective_directions=cast(tuple[Any, ...], ("noop",)),
+            )
 
     def test_objective_direction_rejected_in_model_validator(self) -> None:
-        cfg = FitnessConfig.model_construct(objectives=("f1",), objective_directions=("noop",))
+        cfg = FitnessConfig.model_construct(
+            objectives=("f1",),
+            objective_directions=cast(tuple[Any, ...], ("noop",)),
+        )
         with pytest.raises(ConfigurationError, match="objective_directions\\[0\\]"):
-            cfg._validate_fitness_config()
+            cast(Any, FitnessConfig._validate_fitness_config)(cfg)
 
 
 class TestSerializationConfig:

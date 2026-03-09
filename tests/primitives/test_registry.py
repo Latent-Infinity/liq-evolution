@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 from unittest.mock import patch
 
@@ -26,7 +27,7 @@ class TestBuildTradingRegistry:
         assert len(reg.list_primitives(category="comparison")) == 6
         assert len(reg.list_primitives(category="logic")) == 4
         assert len(reg.list_primitives(category="crossover")) == 4
-        assert len(reg.list_primitives(category="temporal")) == 10
+        assert len(reg.list_primitives(category="temporal")) == 11
         assert len(reg.list_primitives(category="terminal")) == 14
 
     def test_total_primitive_count_default(self) -> None:
@@ -139,7 +140,7 @@ class TestBuildTradingRegistryIndicators:
         reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
         # Standard categories still present when not explicitly disabled.
         assert len(reg.list_primitives(category="numeric")) == 12
-        assert len(reg.list_primitives(category="temporal")) == 10
+        assert len(reg.list_primitives(category="temporal")) == 11
 
     def test_indicator_cache_uses_feature_context(self, liq_features_backend) -> None:
         counting = self._CountingBackend(liq_features_backend)
@@ -182,8 +183,6 @@ class TestBuildTradingRegistryErrorHandling:
 
 
 def test_public_imports_do_not_expose_legacy_liq_ta_symbols() -> None:
-    with pytest.raises(ImportError):
-        from liq.evolution import LiqTAIndicatorBackend  # noqa: F401
-
-    with pytest.raises(ImportError):
-        from liq.evolution import register_liq_ta_indicators  # noqa: F401
+    module = importlib.import_module("liq.evolution")
+    assert not hasattr(module, "LiqTAIndicatorBackend")
+    assert not hasattr(module, "register_liq_ta_indicators")

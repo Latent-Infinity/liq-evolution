@@ -126,10 +126,46 @@ def safe_pct_change(a: np.ndarray, *, period: int = 1) -> np.ndarray:
     else:
         result[:period] = np.nan
         prev = a[: len(a) - period]
-        with np.errstate(divide="ignore", invalid="ignore"):
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
             pct = (a[period:] - prev) / prev
         pct = np.where(np.isfinite(pct), pct, np.nan)
         result[period:] = pct
+    return result
+
+
+def safe_rolling_zscore(a: np.ndarray, *, period: int = 20) -> np.ndarray:
+    """Rolling z-score of current value within `period` bars; leading bars NaN."""
+    result = np.empty(len(a), dtype=np.float64)
+    result[:] = np.nan
+    if period > len(a):
+        return result
+    windows = sliding_window_view(a, period)
+    finite_mask = np.isfinite(windows)
+    counts = np.sum(finite_mask, axis=1)
+    safe_windows = np.where(finite_mask, windows, 0.0)
+    sums = np.sum(safe_windows, axis=1)
+    means = np.divide(
+        sums,
+        counts,
+        out=np.full(counts.shape, np.nan, dtype=np.float64),
+        where=counts > 0,
+    )
+    centered = np.where(finite_mask, windows - means[:, np.newaxis], 0.0)
+    var = np.divide(
+        np.sum(centered * centered, axis=1),
+        counts,
+        out=np.full(counts.shape, np.nan, dtype=np.float64),
+        where=counts > 0,
+    )
+    std = np.sqrt(var)
+    current = a[period - 1 :]
+    valid = (counts > 0) & np.isfinite(current)
+    z = np.full(current.shape, np.nan, dtype=np.float64)
+    nonzero_std = valid & (std > 0.0) & np.isfinite(std)
+    z[nonzero_std] = (current[nonzero_std] - means[nonzero_std]) / std[nonzero_std]
+    flat = valid & ~nonzero_std
+    z[flat] = 0.0
+    result[period - 1 :] = np.where(np.isfinite(z), z, np.nan)
     return result
 
 
@@ -218,4 +254,12 @@ def register_temporal_ops(registry: PrimitiveRegistry) -> None:
         input_types=(Series,),
         output_type=Series,
         param_specs=[ParamSpec("period", int, 1, 1, 50)],
+    )
+    registry.register(
+        "rolling_zscore",
+        safe_rolling_zscore,
+        category="temporal",
+        input_types=(Series,),
+        output_type=Series,
+        param_specs=[ParamSpec("period", int, 20, 2, 100)],
     )

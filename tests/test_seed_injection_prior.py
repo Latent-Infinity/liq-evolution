@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 
@@ -24,13 +26,18 @@ from liq.evolution.seeds import (
 )
 from liq.gp.config import GPConfig
 from liq.gp.primitives.registry import PrimitiveRegistry
-from liq.gp.program.ast import TerminalNode
+from liq.gp.program.ast import Program, TerminalNode
 from liq.gp.program.serialize import serialize
 from liq.gp.types import BoolSeries, FitnessResult
 
 
 def _dummy_builder(_registry: PrimitiveRegistry):
     return TerminalNode(name="close", output_type=BoolSeries)
+
+
+def _terminal_names(programs: list[Program]) -> list[str]:
+    assert all(isinstance(program, TerminalNode) for program in programs)
+    return [cast(TerminalNode, program).name for program in programs]
 
 
 def _fitnesses(size: int) -> list[FitnessResult]:
@@ -61,7 +68,7 @@ class TestSeedTemplateSchemaStage15:
                 name="invalid-role",
                 description="bad",
                 builder=_dummy_builder,
-                block_role="unknown",
+                block_role=cast(Any, "unknown"),
             )
 
         with pytest.raises(
@@ -125,7 +132,7 @@ class TestSeedInjectionCadenceStage15:
         ]
 
         champions = select_seed_champion_pool(population, fitnesses, pool_size=3)
-        assert [program.name for program in champions] == ["gamma", "beta", "alpha"]
+        assert _terminal_names(champions) == ["gamma", "beta", "alpha"]
         assert len({program_signature(p) for p in champions}) == len(champions)
 
     def test_select_champion_pool_validation_and_minimize_order(self) -> None:
@@ -142,7 +149,7 @@ class TestSeedInjectionCadenceStage15:
             pool_size=2,
             objective_direction="minimize",
         )
-        assert [program.name for program in champions] == ["beta", "alpha"]
+        assert _terminal_names(champions) == ["beta", "alpha"]
 
         assert select_seed_champion_pool([], [], pool_size=2) == []
 
@@ -177,7 +184,7 @@ class TestExternalSeedPayloadStage15:
         }
 
         programs = validate_external_seed_payload(payload, registry, strict=False)
-        assert [program.name for program in programs] == ["seed_a", "seed_b"]
+        assert _terminal_names(programs) == ["seed_a", "seed_b"]
 
         with pytest.raises(
             ConfigurationError,
@@ -199,21 +206,21 @@ class TestExternalSeedPayloadStage15:
         path.write_text(str(payload).replace("'", '"'), encoding="utf-8")
 
         from_path = validate_external_seed_payload(path, registry, strict=True)
-        assert [program.name for program in from_path] == ["seed_file"]
+        assert _terminal_names(from_path) == ["seed_file"]
 
         from_path_string = validate_external_seed_payload(
             str(path),
             registry,
             strict=True,
         )
-        assert [program.name for program in from_path_string] == ["seed_file"]
+        assert _terminal_names(from_path_string) == ["seed_file"]
 
         from_json_string = validate_external_seed_payload(
             str(payload).replace("'", '"'),
             registry,
             strict=True,
         )
-        assert [program.name for program in from_json_string] == ["seed_file"]
+        assert _terminal_names(from_json_string) == ["seed_file"]
 
     def test_payload_validation_error_branches(self, tmp_path) -> None:
         registry = PrimitiveRegistry()
@@ -252,26 +259,26 @@ class TestExternalSeedPayloadStage15:
             validate_external_seed_payload("{bad-json", registry, strict=True)
         assert validate_external_seed_payload("{bad-json", registry, strict=False) == []
 
-        assert [program.name for program in validate_external_seed_payload(
+        assert _terminal_names(validate_external_seed_payload(
             {"best_program": seed_payload},
             registry,
             strict=True,
-        )] == ["seed"]
-        assert [program.name for program in validate_external_seed_payload(
+        )) == ["seed"]
+        assert _terminal_names(validate_external_seed_payload(
             {"entry_program": seed_payload},
             registry,
             strict=True,
-        )] == ["seed"]
-        assert [program.name for program in validate_external_seed_payload(
+        )) == ["seed"]
+        assert _terminal_names(validate_external_seed_payload(
             {"pareto_front": [seed_payload]},
             registry,
             strict=True,
-        )] == ["seed"]
-        assert [program.name for program in validate_external_seed_payload(
+        )) == ["seed"]
+        assert _terminal_names(validate_external_seed_payload(
             {"program": seed_payload},
             registry,
             strict=True,
-        )] == ["seed"]
+        )) == ["seed"]
 
         with pytest.raises(ConfigurationError, match="Unsupported external seed payload"):
             validate_external_seed_payload(123, registry, strict=True)

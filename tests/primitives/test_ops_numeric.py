@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -112,6 +114,14 @@ class TestZscore:
     def test_zero_variance(self) -> None:
         a = np.array([5.0, 5.0, 5.0])
         np.testing.assert_array_equal(safe_zscore(a), [0.0, 0.0, 0.0])
+
+    def test_empty_input_no_runtime_warning(self) -> None:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = safe_zscore(np.array([], dtype=float))
+        assert result.size == 0
+        runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+        assert not runtime_warnings
 
 
 class TestLog:

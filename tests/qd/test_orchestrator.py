@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -106,7 +106,8 @@ class TestRunQDEvolution:
 
         assert isinstance(result, QDEvolutionResult)
         assert result.archive.n_dims == 1
-        assert result.coverage_report["filled_bins"] > 0
+        filled_bins = cast(int, result.coverage_report["filled_bins"])
+        assert filled_bins > 0
         assert len(result.portfolio) == 3
         assert result.behavior_descriptor_names == (BEHAVIOR_DESCRIPTOR_TURNOVER,)
 
@@ -259,18 +260,18 @@ def test_run_qd_evolution_falls_back_to_pareto_front_when_archive_empty() -> Non
     original = qd.orchestrator.evolve
 
     try:
-        qd.orchestrator.evolve = lambda **_: SimpleNamespace(
+        qd.orchestrator.evolve = cast(Any, lambda **_: SimpleNamespace(
             best_program=portfolio_program,
             pareto_front=[portfolio_program],
             fitness_history=[],
             config=config,
-        )
+        ))
         result = run_qd_evolution(
             registry=registry,
             config=config,
             evaluator=_ToyEvaluator(),
             context=context,
-            archive=_ArchiveStub(n_dims=1, elites=[]),
+            archive=cast(Any, _ArchiveStub(n_dims=1, elites=[])),
             behavior_descriptor_names=(BEHAVIOR_DESCRIPTOR_TURNOVER,),
             portfolio_size=3,
         )
@@ -292,7 +293,7 @@ def test_safe_float_and_extraction_helpers() -> None:
         },
     )
     invalid_fitness = FitnessResult(
-        objectives=("bad",),
+        objectives=cast(Any, ("bad",)),
         metadata={},
     )
 
@@ -329,7 +330,7 @@ def test_seed_archive_skips_invalid_fitness_and_honors_insert_errors() -> None:
             METADATA_KEY_BEHAVIOR_DESCRIPTORS: {"turnover": 0.5},
         },
     )
-    invalid = FitnessResult(objectives=("bad",), metadata={})
+    invalid = FitnessResult(objectives=cast(Any, ("bad",)), metadata={})
     _seed_archive(archive, population, [valid, invalid], ("turnover",))
     assert len(archive.inserted) == 1
 
@@ -342,12 +343,23 @@ def test_qd_parent_source_applies_coverage_interval_and_minimum_pick() -> None:
     from liq.evolution import qd
 
     original_select = qd.orchestrator.select
-    qd.orchestrator.select = (
-        lambda population, fitnesses, config, rng, *, fronts, ranks, crowding: [
+    def _select(
+        population: list[Any],
+        fitnesses: list[FitnessResult],
+        config: LiqGPConfig,
+        rng: np.random.Generator,
+        *,
+        fronts: list[list[int]] | None,
+        ranks: list[int] | None,
+        crowding: list[int | float] | None,
+    ) -> list[Any]:
+        del population, fitnesses, config, rng, fronts, ranks, crowding
+        return [
             999,
             998,
         ]
-    )
+
+    qd.orchestrator.select = cast(Any, _select)
     archive = _Archive()
     try:
         source = _qd_parent_source(
@@ -367,8 +379,8 @@ def test_qd_parent_source_applies_coverage_interval_and_minimum_pick() -> None:
         rng = np.random.default_rng(0)
         ctx = SelectionContext()
 
-        first = source([1], [fitness], config, rng, target_size=2, sel_ctx=ctx)
-        second = source([2], [fitness], config, rng, target_size=2, sel_ctx=ctx)
+        first = source([1], [fitness], config, rng, 2, ctx)
+        second = source([2], [fitness], config, rng, 2, ctx)
         assert first[:1] == [111]
         assert len(second) == 2
     finally:

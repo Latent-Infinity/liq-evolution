@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from liq.gp.types import FitnessResult
 from liq.evolution.fitness.eval_cache import compute_program_hash
+from liq.gp.types import FitnessResult
 
 if TYPE_CHECKING:
     from liq.gp.program.ast import Program
@@ -73,8 +73,8 @@ class TwoStageFitnessEvaluator:
 
     def evaluate(
         self,
-        programs: list[Program],
-        context: dict[str, np.ndarray],
+        programs: list[Any],
+        context: dict[str, Any],
     ) -> list[FitnessResult]:
         """Evaluate programs through one or two stages.
 
@@ -140,7 +140,7 @@ class TwoStageFitnessEvaluator:
                     promotion_rank=None,
                 )
                 for index, (stage_a_result, reason_code) in enumerate(
-                    zip(stage_a_results, reason_for_all.values())
+                    zip(stage_a_results, reason_for_all.values(), strict=False)
                 )
             ]
 
@@ -185,10 +185,7 @@ class TwoStageFitnessEvaluator:
                 self._stage_b, stage_b_programs, context
             )
         except Exception:
-            if promoted:
-                candidate_hash = program_hashes[promoted[0]]
-            else:
-                candidate_hash = "unknown"
+            candidate_hash = program_hashes[promoted[0]] if promoted else "unknown"
             logger.exception(
                 "two-stage stage_b_failed run_id=%s candidate_hash=%s promoted=%s",
                 run_id,
@@ -236,8 +233,8 @@ class TwoStageFitnessEvaluator:
 
     def evaluate_fitness(
         self,
-        programs: list[Program],
-        context: dict[str, np.ndarray],
+        programs: list[Any],
+        context: dict[str, Any],
     ) -> list[FitnessResult]:
         """Backward-compatible alias for :meth:`evaluate`.
 
@@ -306,7 +303,7 @@ class TwoStageFitnessEvaluator:
 
         budget = self._effective_budget(population)
         if budget <= 0:
-            return [], {idx: "stage_b_budget_zero" for idx in range(population)}
+            return [], dict.fromkeys(range(population), "stage_b_budget_zero")
 
         threshold_pass = finite_ranked
         if self._stage_a_threshold is not None:

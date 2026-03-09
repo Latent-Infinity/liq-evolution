@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -64,7 +66,7 @@ class TestBuildGPConfig:
         evo = EvolutionConfig()
         gp = build_gp_config(evo)
         with pytest.raises(ValidationError):
-            gp.population_size = 999
+            cast(Any, gp).population_size = 999
 
     def test_fitness_objectives_default(self) -> None:
         evo = EvolutionConfig()

@@ -2,36 +2,37 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import numpy as np
 import pytest
 
 liq_ta = pytest.importorskip("liq_ta")
 
 from liq.evolution.primitives.indicators_liq_ta import (  # noqa: E402
-    _build_primitive_name,
+    LiqFeaturesBackend,
+    LiqTAIndicatorBackend,
     _backend_candlestick_patterns,
     _backend_indicators,
-    _canonical_output_suffixes,
-    _canonical_param_name,
+    _build_primitive_name,
     _candidate_name_aliases,
     _candidate_output_aliases,
+    _canonical_output_suffixes,
+    _canonical_param_name,
     _coerce_discrete_default,
     _coerce_output,
     _legacy_output_suffix,
-    LiqTAIndicatorBackend,
-    LiqFeaturesBackend,
-    _make_param_specs_from_metadata,
-    _make_multi_output_callable,
     _make_cached_indicator_callable,
-    _make_single_output_callable,
     _make_candlestick_callable,
+    _make_multi_output_callable,
+    _make_param_specs_from_metadata,
+    _make_single_output_callable,
     _normalize_indicator_name,
     register_liq_ta_indicators,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry  # noqa: E402
 from liq.gp.types import BoolSeries, Series  # noqa: E402
-from types import SimpleNamespace
-from typing import Any
 
 
 @pytest.fixture
@@ -442,14 +443,12 @@ class TestIndicatorHelperFunctions:
             "fastk",
             "slowk",
             "stoch_k",
-            "slowk",
         }
         assert _canonical_output_suffixes("stochastic", "d") == {
             "d",
             "fastd",
             "slowd",
             "stoch_d",
-            "slowd",
         }
         assert _canonical_output_suffixes("sma", "real") == {"real", "value"}
         assert _canonical_output_suffixes("aroon", "aroon_down") == {
@@ -509,6 +508,7 @@ class TestIndicatorHelperFunctions:
         assert specs
         assert len(specs) == 1
         assert specs[0].name == "period"
+        assert specs[0].allowed_values is not None
         assert 2 in specs[0].allowed_values
         assert 8 in specs[0].allowed_values
 
@@ -559,7 +559,10 @@ class TestCallableFactories:
         out = np.zeros(3, dtype=float)
         base = np.array([1.0, 2.0, 3.0])
 
-        def _writer(a: np.ndarray, out: np.ndarray | None = None) -> None:
+        def _writer(
+            a: np.ndarray,
+            out: np.ndarray | None = None,
+        ) -> np.ndarray | None:
             if out is not None:
                 out[:] = a * 2
                 return None

@@ -139,12 +139,12 @@ class TestPublicAPIReexports:
     def test_config_exports(self) -> None:
         from liq.evolution import (
             EvolutionConfig,
-            RegimeGateConfig,
             FitnessConfig,
             FitnessStageConfig,
             GPConfig,
             ParallelConfig,
             PrimitiveConfig,
+            RegimeGateConfig,
             SerializationConfig,
             StrategyEvaluator,
             WarmStartConfig,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -100,9 +101,9 @@ def test_evaluate_batch_prefers_ray_backend_fallback_when_missing() -> None:
 
     def _raise_for_ray(
         name: str,
-        globals: object | None = None,
-        locals: object | None = None,
-        fromlist: tuple[str, ...] = (),
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
         level: int = 0,
     ) -> object:
         if name == "ray":

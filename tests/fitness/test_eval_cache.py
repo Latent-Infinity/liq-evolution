@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -31,7 +31,7 @@ def _make_split(slice_id: str | None = "time_window:split_0") -> WalkForwardSpli
         train=slice(0, 2),
         validate=slice(2, 4),
         test=slice(4, 6),
-        slice_id=slice_id,
+        slice_id=cast(str, slice_id),
     )
 
 

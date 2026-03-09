@@ -5,11 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from liq.evolution.errors import ConfigurationError
-from liq.evolution.program import FunctionNode
 from liq.evolution.config import PrimitiveConfig
+from liq.evolution.errors import ConfigurationError
 from liq.evolution.primitives.registry import build_trading_registry
 from liq.evolution.primitives.series_sources import prepare_evaluation_context
+from liq.evolution.program import FunctionNode, ParameterizedNode, TerminalNode
 from liq.evolution.seeds import (
     StrategySeedTemplate,
     build_strategy_seed,
@@ -18,8 +18,8 @@ from liq.evolution.seeds import (
     list_known_strategy_seeds,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry
-from liq.gp.types import BoolSeries, Series
 from liq.gp.program.eval import evaluate as evaluate_program
+from liq.gp.types import BoolSeries, Series
 
 
 def _seed_registry() -> PrimitiveRegistry:
@@ -636,10 +636,13 @@ class TestStrategySeedRegistry:
             spread_smooth_period=10,
         )
 
+        assert isinstance(program, FunctionNode)
         spread = program.children[0]
-        assert spread.primitive.name == "atr"  # type: ignore[attr-defined]
-        assert len(spread.children) == 1  # type: ignore[attr-defined]
-        assert spread.children[0].name == "close"  # type: ignore[attr-defined]
+        assert isinstance(spread, ParameterizedNode)
+        assert spread.primitive.name == "atr"
+        assert len(spread.children) == 1
+        assert isinstance(spread.children[0], TerminalNode)
+        assert spread.children[0].name == "close"
 
     def test_carry_spread_rejects_unsupported_atr_arity(self) -> None:
         registry = PrimitiveRegistry()

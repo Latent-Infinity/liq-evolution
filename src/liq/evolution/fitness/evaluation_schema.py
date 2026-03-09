@@ -276,7 +276,7 @@ def validate_objective_vector(
 
 
 def _validate_objective_directions(
-    objective_directions: Sequence[ObjectiveDirection] | None,
+    objective_directions: Sequence[str] | None,
     expected_count: int,
     *,
     issues: list[SchemaValidationError],
@@ -309,7 +309,7 @@ def validate_evaluation_metadata(
     *,
     expected_objective_count: int,
     require_slice_scores: bool = False,
-    objective_directions: Sequence[ObjectiveDirection] | None = None,
+    objective_directions: Sequence[str] | None = None,
 ) -> list[SchemaValidationError]:
     """Validate a fitness metadata payload against stage-0 contract rules.
 

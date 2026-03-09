@@ -17,16 +17,17 @@ from liq.evolution.primitives.ops_temporal import (
     safe_n_bars_ago,
     safe_pct_change,
     safe_percentile_rank,
+    safe_rolling_zscore,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry
 from liq.gp.types import BoolSeries, Series
 
 
 class TestRegistration:
-    def test_registers_ten_operators(self) -> None:
+    def test_registers_eleven_operators(self) -> None:
         reg = PrimitiveRegistry()
         register_temporal_ops(reg)
-        assert len(reg.list_primitives(category="temporal")) == 10
+        assert len(reg.list_primitives(category="temporal")) == 11
 
     def test_all_parameterized(self) -> None:
         reg = PrimitiveRegistry()
@@ -54,6 +55,7 @@ class TestRegistration:
             "lower_count",
             "change",
             "pct_change",
+            "rolling_zscore",
         ]:
             assert prims[name].output_type == Series, f"{name}"
 
@@ -214,6 +216,27 @@ class TestPctChange:
         assert np.isnan(result[1])  # division by zero
 
 
+class TestRollingZscore:
+    def test_basic(self) -> None:
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = safe_rolling_zscore(a, period=5)
+        for i in range(4):
+            assert np.isnan(result[i])
+        np.testing.assert_allclose(result[4], (5.0 - 3.0) / np.sqrt(2.0), atol=1e-10)
+
+    def test_flat_window_zero(self) -> None:
+        a = np.array([7.0, 7.0, 7.0, 7.0])
+        result = safe_rolling_zscore(a, period=3)
+        assert np.isnan(result[0])
+        assert np.isnan(result[1])
+        np.testing.assert_array_equal(result[2:], [0.0, 0.0])
+
+    def test_period_exceeds_length_all_nan(self) -> None:
+        a = np.array([1.0, 2.0])
+        result = safe_rolling_zscore(a, period=5)
+        assert np.all(np.isnan(result))
+
+
 class TestOutputLength:
     @pytest.mark.parametrize(
         "op,kwargs",
@@ -225,6 +248,7 @@ class TestOutputLength:
             (safe_lowest, {"period": 3}),
             (safe_change, {"period": 1}),
             (safe_pct_change, {"period": 1}),
+            (safe_rolling_zscore, {"period": 3}),
         ],
     )
     def test_unary_length(self, op, kwargs) -> None:

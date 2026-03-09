@@ -7,9 +7,10 @@ time (fail-fast).  Invalid values raise
 
 from __future__ import annotations
 
-from pathlib import Path
 import math
-from typing import Any, Literal, Mapping, Self
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 

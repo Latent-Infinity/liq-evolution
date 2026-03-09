@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -24,7 +25,7 @@ def _program() -> TerminalNode:
     return TerminalNode(name="close", output_type=Series)
 
 
-def _adapter(**kwargs: object) -> GPStrategyAdapter:
+def _adapter(**kwargs: Any) -> GPStrategyAdapter:
     adapter = GPStrategyAdapter(
         PrimitiveRegistry(),
         GPConfig(population_size=16, max_depth=4, generations=1),
@@ -97,7 +98,7 @@ class TestStage4RegimeOutputContract:
         with pytest.raises(TypeError):
             GPSignalOutput(
                 scores=pl.Series("scores", [0.1]),
-                metadata=[],
+                metadata=cast(Any, []),
             )
 
         with pytest.raises(TypeError):

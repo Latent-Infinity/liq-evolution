@@ -2,33 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import importlib
+from collections.abc import Mapping
+from typing import Any
 
 import liq_ta
 import numpy as np
 import polars as pl
 
-_LIQ_FEATURES_IMPORT_ERROR: Exception | None = None
-
-try:
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        get_indicator_metadata as get_lq_indicator_metadata,
-    )
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        list_indicators as list_lq_indicators,
-    )
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        get_indicator,
-    )
-except Exception as exc:  # pragma: no cover - exercised by environment guard tests
-    get_lq_indicator_metadata = None
-    list_lq_indicators = None
-    get_indicator = None
-    _LIQ_FEATURES_IMPORT_ERROR = exc
-
 from liq.evolution.protocols import IndicatorBackend
 from liq.gp.primitives.registry import PrimitiveRegistry
-from liq.gp.types import BoolSeries, ParamSpec, Series
+from liq.gp.types import BoolSeries, GPType, ParamSpec, Series
+
+_LIQ_FEATURES_IMPORT_ERROR: Exception | None = None
+get_indicator: Any | None = None
+get_lq_indicator_metadata: Any | None = None
+list_lq_indicators: Any | None = None
+
+try:
+    from liq.features.indicators import get_indicator
+    from liq.features.indicators import (
+        get_indicator_metadata as get_lq_indicator_metadata,
+    )
+    from liq.features.indicators import list_indicators as list_lq_indicators
+except Exception as exc:  # pragma: no cover - exercised by environment guard tests
+    _LIQ_FEATURES_IMPORT_ERROR = exc
 
 
 def _require_liq_features() -> None:
@@ -123,9 +121,9 @@ def _canonical_output_suffixes(indicator: str, output: str) -> set[str]:
 
     if indicator in {"stochastic", "stoch"}:
         if output in {"k", "fastk", "slowk", "stoch_k"}:
-            suffixes.update({"k", "fastk", "slowk", "stoch_k", "slowk"})
+            suffixes.update({"k", "fastk", "slowk", "stoch_k"})
         elif output in {"d", "fastd", "slowd", "stoch_d"}:
-            suffixes.update({"d", "fastd", "slowd", "stoch_d", "slowd"})
+            suffixes.update({"d", "fastd", "slowd", "stoch_d"})
 
     if output == "real":
         suffixes.add("value")
@@ -230,7 +228,7 @@ class LiqFeaturesBackend:
             return len(data["close"])
         for value in data.values():
             if hasattr(value, "__len__"):
-                return len(value)  # type: ignore[arg-type]
+                return len(value)
         raise ValueError("Indicator data input is empty")
 
     @staticmethod
@@ -468,7 +466,7 @@ def _make_param_specs_from_metadata(
     source_params: list[Any] = []
     if not canonical_param_names:
         if isinstance(param_metadata.get("params"), (list, tuple)):
-            source_params = [p for p in param_metadata.get("params", [])]
+            source_params = list(param_metadata.get("params", []))
         else:
             source_params = list(defaults.keys())
 
@@ -482,7 +480,8 @@ def _make_param_specs_from_metadata(
 
     # Use liq-features parameter grids when available.
     try:
-        from liq.features.indicators.param_grids import get_param_grid
+        param_grids = importlib.import_module("liq.features.indicators.param_grids")
+        get_param_grid = getattr(param_grids, "get_param_grid", None)
     except Exception:
         get_param_grid = None
 
@@ -642,7 +641,7 @@ def _fallback_fallback_indicator_meta() -> dict[str, dict[str, Any]]:
 
         raw_params = entry.get("parameters", [])
         if isinstance(raw_params, Mapping):
-            params = [str(key) for key in raw_params.keys() if key]
+            params = [str(key) for key in raw_params if key]
         elif isinstance(raw_params, list | tuple):
             for param in raw_params:
                 if isinstance(param, Mapping) and "name" in param:
@@ -814,7 +813,7 @@ def _make_candlestick_callable(func: Any) -> Any:
 
 
 def _make_cached_indicator_callable(
-    backend: IndicatorBackend,
+    backend: Any,
     name: str,
     input_names: list[str],
     output_index: int,
@@ -863,7 +862,7 @@ def _make_cached_indicator_callable(
         target_len = 0
         for value in data.values():
             if hasattr(value, "__len__"):
-                target_len = len(value)  # type: ignore[arg-type]
+                target_len = len(value)
                 break
 
         kwargs, out = _split_kwargs(kwargs)
@@ -886,7 +885,7 @@ def _make_cached_indicator_callable(
     return wrapper
 
 
-def _backend_indicators(backend: IndicatorBackend) -> dict[str, dict[str, Any]]:
+def _backend_indicators(backend: Any) -> dict[str, dict[str, Any]]:
     """Resolve indicator metadata source from a backend wrapper."""
 
     metadata_source = getattr(backend, "_indicators", None)
@@ -902,7 +901,7 @@ def _backend_indicators(backend: IndicatorBackend) -> dict[str, dict[str, Any]]:
     return _fallback_fallback_indicator_meta()
 
 
-def _backend_candlestick_patterns(backend: IndicatorBackend) -> list[str]:
+def _backend_candlestick_patterns(backend: Any) -> list[str]:
     """Resolve candlestick discovery source from a backend wrapper."""
     if isinstance(backend, LiqFeaturesBackend):
         return sorted(
@@ -1031,9 +1030,9 @@ def register_liq_ta_indicators(
     def _register_aliases(
         primitive_names: list[str],
         callable_: Any,
-        input_types: tuple[type[Series], ...],
+        input_types: tuple[GPType, ...],
         *,
-        output_type: type[Series] | type[BoolSeries],
+        output_type: GPType,
         param_specs: list[ParamSpec] | None,
     ) -> None:
         prototype: Any | None = None

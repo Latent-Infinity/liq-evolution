@@ -6,10 +6,11 @@ import pytest
 
 from liq.evolution.validation import ConstraintPolicy
 from liq.gp.program.ast import Program, TerminalNode
+from liq.gp.types import Series
 
 
 def _program() -> Program:
-    return TerminalNode(name="signal", output_type=float)
+    return TerminalNode(name="signal", output_type=Series)
 
 
 def test_constraint_policy_rejects_invalid_robustness_rollout() -> None:

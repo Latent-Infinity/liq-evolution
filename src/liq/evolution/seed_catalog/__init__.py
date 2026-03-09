@@ -6,8 +6,8 @@ from collections.abc import Iterable
 
 from liq.evolution.errors import ConfigurationError
 from liq.evolution.program import Program
-from liq.evolution.protocols import PrimitiveRegistry
 from liq.evolution.seed_catalog._core import (
+    PrimitiveRegistryLike,
     SeedTemplateRole,
     StrategySeedTemplate,
     _normalize_seed_name,
@@ -16,10 +16,10 @@ from liq.evolution.seed_catalog._core import (
 from .candles import SEED_TEMPLATES as _CANDLE_SEEDS
 from .carry_spread import SEED_TEMPLATES as _CARRY_SPREAD_SEEDS
 from .momentum import SEED_TEMPLATES as _MOMENTUM_SEEDS
+from .payloads import built_in_seed_payloads
 from .regimes import SEED_TEMPLATES as _REGIME_SEEDS
 from .trend import SEED_TEMPLATES as _TREND_SEEDS
 from .volatility import SEED_TEMPLATES as _VOLATILITY_SEEDS
-
 
 _DETECTOR_TEMPLATES = {
     "atr_volatility_spike",
@@ -191,14 +191,14 @@ def get_seed_template(name: str) -> StrategySeedTemplate:
         raise KeyError(msg) from exc
 
 
-def build_strategy_seed(name: str, registry: PrimitiveRegistry) -> Program:
+def build_strategy_seed(name: str, registry: PrimitiveRegistryLike) -> Program:
     """Build a single known strategy seed."""
     template = get_seed_template(name)
     return template.builder(registry)
 
 
 def build_strategy_seeds(
-    names: Iterable[str], registry: PrimitiveRegistry
+    names: Iterable[str], registry: PrimitiveRegistryLike
 ) -> list[Program]:
     """Build multiple known strategy seeds."""
     return [build_strategy_seed(name, registry) for name in names]
@@ -228,6 +228,7 @@ __all__ = [
     "SeedTemplateRole",
     "build_strategy_seed",
     "build_strategy_seeds",
+    "built_in_seed_payloads",
     "get_seed_template",
     "list_known_strategy_seeds",
     "list_seed_templates_by_role",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import random
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -149,7 +149,17 @@ def summarize_regime_participation(
 
         counter: Counter[str] = Counter()
         for slice_ in (bars.train, bars.validate, bars.test):
-            segment = values[slice_]
+            if isinstance(slice_, slice):
+                segment = values[slice_]
+            else:
+                if timestamps is None:
+                    raise TypeError("timestamp tuple slices require timestamps")
+                start_ts, end_ts = slice_
+                segment = [
+                    value
+                    for timestamp, value in zip(timestamps, values, strict=False)
+                    if start_ts <= timestamp < end_ts
+                ]
             counter.update(str(value) for value in segment)
         summaries.append(dict(sorted(counter.items(), key=lambda item: item[0])))
     return summaries

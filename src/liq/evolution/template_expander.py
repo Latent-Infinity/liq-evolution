@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -88,7 +88,7 @@ class CFGLiteTemplateExpander:
         if not templates:
             return {}
         uniform = 1.0 / float(len(templates))
-        return {template: uniform for template in templates}
+        return dict.fromkeys(templates, uniform)
 
     def _normalize_role(self, role: SeedTemplateRole | _RoleName | str) -> _RoleName:
         normalized = str(role).strip().lower()
@@ -107,7 +107,7 @@ class CFGLiteTemplateExpander:
                 raise ValueError(f"role {role!r} does not support weighted templates")
             return {}
 
-        merged = {name: 0.0 for name in self._templates[role]}
+        merged = dict.fromkeys(self._templates[role], 0.0)
         for name, value in weights.items():
             if name not in available:
                 raise ValueError(f"unknown template {name!r} for role {role!r}")

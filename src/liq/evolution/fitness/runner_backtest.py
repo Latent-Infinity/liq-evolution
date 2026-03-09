@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-import time
+from contextlib import suppress
 from typing import Any, Literal
 
 import numpy as np
@@ -75,8 +76,8 @@ class BacktestFitnessEvaluator:
         metric: str = "sharpe_ratio",
         *,
         objective_mode: Literal["scalar", "vector"] = "scalar",
-        simulator: Callable[[Any, Mapping[str, Any]], Mapping[str, Any]] | None = None,
-        risk_model: Callable[[Any, Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        simulator: Callable[[Any, dict[str, Any]], Mapping[str, Any]] | None = None,
+        risk_model: Callable[[Any, dict[str, Any]], Mapping[str, Any]] | None = None,
         max_folds: int | None = None,
         max_runtime_seconds: float | None = None,
         memory_budget_mb: float | None = None,
@@ -344,10 +345,11 @@ class BacktestFitnessEvaluator:
                 for key, value in component_metrics_raw.items():
                     base_metrics[str(key)] = value
 
+        fold_dict = dict(fold)
         if self._simulator is not None:
-            _merge_component(self._simulator(strategy, fold))
+            _merge_component(self._simulator(strategy, fold_dict))
         if self._risk_model is not None:
-            _merge_component(self._risk_model(strategy, fold))
+            _merge_component(self._risk_model(strategy, fold_dict))
 
         merged["metrics"] = base_metrics
         return merged
@@ -405,7 +407,7 @@ class BacktestFitnessEvaluator:
 
     def _compute_regime_stability_penalty(
         self,
-        regime_records: list[Mapping[str, Any]],
+        regime_records: Sequence[Mapping[str, Any]],
         *,
         reason_codes: list[str],
     ) -> float:
@@ -459,7 +461,7 @@ class BacktestFitnessEvaluator:
 
     def _compute_regime_coverage_penalty(
         self,
-        regime_records: list[Mapping[str, Any]],
+        regime_records: Sequence[Mapping[str, Any]],
         *,
         reason_codes: list[str],
     ) -> float:
@@ -490,7 +492,7 @@ class BacktestFitnessEvaluator:
         self,
         return_values: list[float],
         drawdown_values: list[float],
-        regime_records: list[Mapping[str, Any]],
+        regime_records: Sequence[Mapping[str, Any]],
         *,
         reason_codes: list[str],
     ) -> float:
@@ -585,10 +587,8 @@ class BacktestFitnessEvaluator:
             )
             value = metrics.get(self._metric)
             if value is not None:
-                try:
+                with suppress(TypeError, ValueError):
                     metric_values.append(float(value))
-                except (TypeError, ValueError):
-                    pass
 
             return_raw = self._metric_value_optional(
                 metrics,

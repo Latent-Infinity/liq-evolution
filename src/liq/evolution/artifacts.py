@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 import importlib.metadata
 import json
 import math
 import platform
 import sys
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 from liq.evolution.protocols import EVOLUTION_PROTOCOL_VERSION
 

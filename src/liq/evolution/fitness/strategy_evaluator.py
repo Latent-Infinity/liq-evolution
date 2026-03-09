@@ -6,9 +6,9 @@ import hashlib
 import logging
 import math
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from liq.datasets.walk_forward import WalkForwardSplit
 from liq.evolution.errors import FitnessEvaluationError
@@ -60,8 +60,8 @@ from liq.sim.fx_eval import (
     turnover_from_positions,
 )
 
-
 logger = logging.getLogger(__name__)
+
 
 DEFAULT_OBJECTIVES = (
     "cagr",
@@ -127,13 +127,11 @@ class StrategyEvaluator:
 
     def __init__(
         self,
-        backtest_runner: Callable[
-            [Any, Mapping[str, Any], WalkForwardSplit], Mapping[str, Any]
-        ],
+        backtest_runner: Any,
         splits: Sequence[WalkForwardSplit],
         *,
         objectives: Sequence[str] = DEFAULT_OBJECTIVES,
-        objective_directions: Sequence[ObjectiveDirection] | None = None,
+        objective_directions: Sequence[str] | None = None,
         split_weights: Mapping[str, float] | None = None,
         include_test: bool = False,
         behavior_descriptor_names: Sequence[str] | None = None,
@@ -217,7 +215,7 @@ class StrategyEvaluator:
                 )
 
         self._config = StrategyEvaluatorConfig(
-            objective_directions=objective_directions,
+            objective_directions=cast(tuple[ObjectiveDirection, ...], objective_directions),
             split_weights=(
                 split_weight_values["train"],
                 split_weight_values["validate"],
@@ -466,10 +464,7 @@ class StrategyEvaluator:
         )
 
     def _program_hash(self, program: Program, *, index: int | None = None) -> str:
-        if index is not None:
-            fallback = f"{index}"
-        else:
-            fallback = "program"
+        fallback = f"{index}" if index is not None else "program"
         try:
             return compute_program_hash(program)
         except Exception:
@@ -773,7 +768,7 @@ def _resolve_metric(
 
 
 def _sanitize_objective(
-    value: float,
+    value: object,
     *,
     direction: ObjectiveDirection,
     nan_penalty: float,

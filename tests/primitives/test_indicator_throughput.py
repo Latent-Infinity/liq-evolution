@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
-import pytest
 
 from liq.evolution.primitives.indicators_liq_ta import (
     LiqFeaturesBackend,

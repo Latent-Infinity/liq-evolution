@@ -75,10 +75,10 @@ class LiqStoreEvolutionArtifactStore:
             return
 
         key = self._artifact_key(artifact_id)
-        if hasattr(artifact, "model_dump") and callable(getattr(artifact, "model_dump")):
+        if hasattr(artifact, "model_dump") and callable(artifact.model_dump):
             payload = artifact.model_dump()  # type: ignore[attr-defined]
         elif hasattr(artifact, "payload"):
-            payload = {"payload": getattr(artifact, "payload")}
+            payload = {"payload": artifact.payload}
         else:
             payload = {"artifact": str(artifact)}
         encoded = serialize_sensitive_payload(

@@ -288,7 +288,7 @@ class ParallelEvaluator:
             )
         return rss_mb >= self.memory_limit_mb
 
-    def _make_eval_fn(self, evaluator: Evaluator) -> Callable[..., list[Any]]:
+    def _make_eval_fn(self, evaluator: object) -> Callable[..., list[Any]]:
         """Extract a plain callable from the evaluator for remote dispatch."""
         if hasattr(evaluator, "evaluate") and callable(evaluator.evaluate):
             return cast(Callable[[list[Any], Any], list[Any]], evaluator.evaluate)
@@ -307,7 +307,7 @@ class ParallelEvaluator:
 
     @staticmethod
     def _call_evaluator(
-        evaluator: Evaluator,
+        evaluator: object,
         programs: list[Any],
         context: Any,
     ) -> list[Any]:

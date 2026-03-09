@@ -7,11 +7,13 @@ inherit from liq-evolution classes.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from liq.core.security import (
     SENSITIVE_CONTEXT_KEYS as _SENSITIVE_CONTEXT_KEYS,
+)
+from liq.core.security import (
     mask_sensitive_context as _mask_sensitive_context,
 )
 from liq.evolution.errors import (
@@ -95,7 +97,7 @@ class IndicatorBackend(Protocol):
     """Backend for computing technical indicators.
 
     Implement this protocol to provide indicator values from any
-    technical analysis library (e.g. liq-ta, ta-lib).
+    technical analysis library (e.g. liq-ta).
 
     Example::
 

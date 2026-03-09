@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,42 +20,46 @@ class FeatureContext:
     def __init__(self, backend: IndicatorBackend) -> None:
         self._backend = backend
         self._cache: dict[
-            tuple[
-                str,
-                tuple[tuple[str, Any], ...],
-                tuple[tuple[str, Any], ...],
-                tuple[tuple[str, Any], ...],
-            ],
+            tuple[str, tuple[tuple[str, Any], ...], tuple[tuple[str, int, tuple[int, ...]], ...]],
             np.ndarray,
         ] = {}
 
     @staticmethod
+    def _data_signature(data: dict[str, np.ndarray]) -> tuple[tuple[str, int, tuple[int, ...]], ...]:
+        signature: list[tuple[str, int, tuple[int, ...]]] = []
+        for name, value in sorted(data.items()):
+            arr = np.asarray(value)
+            ptr = int(arr.__array_interface__["data"][0])
+            shape = tuple(int(x) for x in arr.shape)
+            signature.append((name, ptr, shape))
+        return tuple(signature)
+
+    @staticmethod
     def _hashable(value: Any) -> Any:
-        """Convert cache values into deterministic, hashable forms."""
-        if isinstance(value, Hashable):
-            return value
         if isinstance(value, np.ndarray):
-            return (
-                "ndarray",
-                value.shape,
-                value.dtype.str,
-                str(value.ravel()[:16].tolist()),
-            )
+            return ("ndarray", value.shape, value.dtype.str)
         if isinstance(value, dict):
-            return tuple(sorted((str(k), FeatureContext._hashable(v)) for k, v in value.items()))
-        if isinstance(value, list):
-            hashed = [FeatureContext._hashable(v) for v in value]
-            try:
-                return ("list", tuple(sorted(hashed)))
-            except TypeError:
-                return ("list", tuple(hashed))
+            return tuple(
+                (key, FeatureContext._hashable(val))
+                for key, val in sorted(value.items())
+            )
         if isinstance(value, tuple):
-            hashed = tuple(FeatureContext._hashable(v) for v in value)
-            try:
-                return ("tuple", tuple(sorted(hashed)))
-            except TypeError:
-                return ("tuple", hashed)
-        return repr(value)
+            return ("tuple", tuple(FeatureContext._hashable(item) for item in value))
+        if isinstance(value, list):
+            normalized = [FeatureContext._hashable(item) for item in value]
+            return ("list", tuple(sorted(normalized, key=repr)))
+        try:
+            hash(value)
+        except Exception:
+            return repr(value)
+        return value
+
+    @staticmethod
+    def _params_key(params: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+        return tuple(
+            (key, FeatureContext._hashable(value))
+            for key, value in sorted(params.items())
+        )
 
     def compute(
         self,
@@ -65,20 +68,7 @@ class FeatureContext:
         data: dict[str, np.ndarray],
         **kwargs: Any,
     ) -> np.ndarray:
-        cache_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if key not in {"out", "ts", "data", "cache"}
-        }
-        data_signature = tuple(
-            sorted((k, self._hashable(v)) for k, v in data.items())
-        )
-        key = (
-            name,
-            tuple(sorted((k, self._hashable(v)) for k, v in params.items())),
-            data_signature,
-            tuple(sorted((k, self._hashable(v)) for k, v in cache_kwargs.items())),
-        )
+        key = (name, self._params_key(params), self._data_signature(data))
         if key in self._cache:
             return self._cache[key]
         result = self._backend.compute(name, params, data, **kwargs)
@@ -97,11 +87,11 @@ class FeatureContext:
             self._cache.clear()
             return
         if params is not None:
-            params_key = tuple(sorted((k, self._hashable(v)) for k, v in params.items()))
+            params_key = self._params_key(params)
             self._cache = {
-                key: value
-                for key, value in self._cache.items()
-                if not (key[0] == name and key[1] == params_key)
+                k: v
+                for k, v in self._cache.items()
+                if not (k[0] == name and k[1] == params_key)
             }
         else:
             self._cache = {k: v for k, v in self._cache.items() if k[0] != name}

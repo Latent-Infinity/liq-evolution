@@ -25,9 +25,9 @@ class QDEvolutionResult:
     """Structured output for QD-enabled evolution runs."""
 
     evolution_result: EvolutionResult
-    archive: QDArchive
-    portfolio: list[Program]
-    coverage_report: dict[str, object]
+    archive: Any
+    portfolio: list[Any]
+    coverage_report: dict[str, Any]
     behavior_descriptor_names: tuple[str, ...]
 
 
@@ -75,8 +75,8 @@ def _extract_descriptors(
 
 
 def _seed_archive(
-    archive: QDArchive,
-    population: list[Program],
+    archive: Any,
+    population: list[Any],
     fitnesses: list[FitnessResult],
     descriptor_names: tuple[str, ...],
 ) -> None:
@@ -94,26 +94,19 @@ def _seed_archive(
 
 
 def _qd_parent_source(
-    archive: QDArchive,
+    archive: Any,
     descriptor_names: tuple[str, ...],
     *,
     coverage_weight: float = 0.3,
     coverage_interval: int = 1,
 ) -> Callable[
-    [
-        list[Program],
-        list[FitnessResult],
-        GPConfig,
-        np.random.Generator,
-        int,
-        SelectionContext,
-    ],
-    list[Program],
+    [list[Any], list[FitnessResult], GPConfig, np.random.Generator, int, SelectionContext],
+    list[Any],
 ]:
     generation = 0
 
     def source(
-        population: list[Program],
+        population: list[Any],
         fitnesses: list[FitnessResult],
         config: GPConfig,
         rng: np.random.Generator,
@@ -173,7 +166,7 @@ def run_qd_evolution(
     evaluator: Any,
     context: Mapping[str, Any],
     *,
-    archive: QDArchive | None = None,
+    archive: Any | None = None,
     behavior_descriptor_names: Sequence[str] | None = None,
     archive_bins_per_dim: int | tuple[int, ...] = 4,
     archive_bin_capacity: int = 1,
@@ -245,9 +238,9 @@ def run_qd_evolution(
     )
 
     if portfolio_size is None:
-        portfolio: list[Program] = cast(list[Program], archive.elites())
+        portfolio: list[Any] = cast(list[Any], archive.elites())
     else:
-        portfolio = cast(list[Program], archive.elites())[:portfolio_size]
+        portfolio = cast(list[Any], archive.elites())[:portfolio_size]
     if not portfolio:
         portfolio = evolution_result.pareto_front[:portfolio_size]
 
