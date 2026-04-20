@@ -573,6 +573,29 @@ class TestStrategySeedRegistry:
         assert template.turnover_expectation is None
         assert template.failure_modes
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "bollinger_breakout",
+            "donchian_breakout",
+            "vwap_support",
+            "obv_uptrend",
+            "ad_ascending",
+            "adxr_trend",
+            "mfi_oversold",
+            "mfi_overbought",
+            "cci_oversold",
+            "cci_overbought",
+        ],
+    )
+    def test_seed_builders_compile_with_default_registry(self, name: str) -> None:
+        registry = build_trading_registry(PrimitiveConfig())
+        template = get_seed_template(name)
+
+        program = template.builder(registry)
+
+        assert program is not None
+
     def test_seed_behaviour_rsi_oversold_fires_when_oversold(self) -> None:
         registry = build_trading_registry(PrimitiveConfig())
         template = get_seed_template("rsi_oversold")

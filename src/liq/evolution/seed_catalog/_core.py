@@ -27,7 +27,9 @@ class SeedTemplateRole(StrEnum):
     risk = "risk"
 
 
-def _normalize_str_tuple(values: tuple[str, ...] | list[str] | set[str]) -> tuple[str, ...]:
+def _normalize_str_tuple(
+    values: tuple[str, ...] | list[str] | set[str],
+) -> tuple[str, ...]:
     normalized: list[str] = []
     for value in values:
         if not isinstance(value, str):
@@ -76,14 +78,18 @@ class StrategySeedTemplate:
         if not isinstance(self.arity, int) or self.arity < 1:
             raise ValueError("template arity must be a positive integer")
 
-        object.__setattr__(self, "expected_inputs", _normalize_str_tuple(self.expected_inputs))
+        object.__setattr__(
+            self, "expected_inputs", _normalize_str_tuple(self.expected_inputs)
+        )
         if len(self.expected_inputs) != self.arity:
             raise ValueError(
                 "template arity must match expected_inputs length: "
                 f"{self.arity} != {len(self.expected_inputs)}"
             )
 
-        object.__setattr__(self, "regime_hints", _normalize_str_tuple(self.regime_hints))
+        object.__setattr__(
+            self, "regime_hints", _normalize_str_tuple(self.regime_hints)
+        )
         object.__setattr__(
             self,
             "failure_modes",
@@ -92,7 +98,9 @@ class StrategySeedTemplate:
 
         if self.turnover_expectation is not None:
             if not isinstance(self.turnover_expectation, (int, float)):
-                raise TypeError("template turnover_expectation must be numeric when set")
+                raise TypeError(
+                    "template turnover_expectation must be numeric when set"
+                )
             turnover = float(self.turnover_expectation)
             if not math.isfinite(turnover):
                 raise ValueError("template turnover_expectation must be finite")
@@ -169,6 +177,15 @@ def _resolve_primitive(
                 prefixed = f"ta_{candidate}"
                 if prefixed not in seen_candidates:
                     pending.append(prefixed)
+
+            if "bollinger" in candidate:
+                bbands_alias = candidate.replace("bollinger", "bbands")
+                if bbands_alias not in seen_candidates:
+                    pending.append(bbands_alias)
+            if "bbands" in candidate:
+                bollinger_alias = candidate.replace("bbands", "bollinger")
+                if bollinger_alias not in seen_candidates:
+                    pending.append(bollinger_alias)
 
             parts = candidate.split("_")
             if len(parts) > 1 and parts[0]:

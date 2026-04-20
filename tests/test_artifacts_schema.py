@@ -136,7 +136,9 @@ def test_evolution_run_artifact_from_payload_uses_fallback_defaults() -> None:
     assert artifact.metadata == {}
 
 
-def test_evolution_run_artifact_from_payload_requires_migrator_for_legacy(monkeypatch) -> None:
+def test_evolution_run_artifact_from_payload_requires_migrator_for_legacy(
+    monkeypatch,
+) -> None:
     import builtins
 
     real_import = builtins.__import__

@@ -20,7 +20,9 @@ from liq.gp.types import BoolSeries, Series
 
 
 def _detector() -> RegimeDetector:
-    return RegimeDetector(RegimeId.trend, TerminalNode(name="detector", output_type=BoolSeries))
+    return RegimeDetector(
+        RegimeId.trend, TerminalNode(name="detector", output_type=BoolSeries)
+    )
 
 
 def _gate() -> RegimeGate:

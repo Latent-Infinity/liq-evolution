@@ -126,7 +126,9 @@ def safe_pct_change(a: np.ndarray, *, period: int = 1) -> np.ndarray:
     else:
         result[:period] = np.nan
         prev = a[: len(a) - period]
-        with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
+        with np.errstate(
+            divide="ignore", invalid="ignore", over="ignore", under="ignore"
+        ):
             pct = (a[period:] - prev) / prev
         pct = np.where(np.isfinite(pct), pct, np.nan)
         result[period:] = pct

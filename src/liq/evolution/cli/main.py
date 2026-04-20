@@ -290,7 +290,9 @@ def _collect_overrides(namespace: argparse.Namespace) -> dict[str, Any]:
     if fitness_stage_overrides:
         overrides["fitness_stages"] = fitness_stage_overrides
         if namespace.use_backtest is not None:
-            overrides.setdefault("fitness", {})["stage_b_enabled"] = namespace.use_backtest
+            overrides.setdefault("fitness", {})["stage_b_enabled"] = (
+                namespace.use_backtest
+            )
 
     regime_overrides: dict[str, Any] = {}
     for key, value in (
@@ -334,7 +336,7 @@ def _validate_runtime_safety(
             error_code="evo.cli.unsafe_budget",
             message=(
                 "Stage-A candidate budget is above the safe guardrail "
-                f"({_SAFE_STAGE_A_BUDGET_LIMIT-1})."
+                f"({_SAFE_STAGE_A_BUDGET_LIMIT - 1})."
             ),
             remediation=(
                 "Use a lower stage-a-candidate-budget or pass --allow-expensive "
@@ -357,7 +359,9 @@ def _build_config(namespace: argparse.Namespace) -> EvolutionConfig:
             remediation=(
                 "Fix config values and rerun. See the error context for each field."
             ),
-            context={"validation_errors": [{"msg": str(exc), "type": "configuration_error"}]},
+            context={
+                "validation_errors": [{"msg": str(exc), "type": "configuration_error"}]
+            },
         ) from exc
     except ValidationError as exc:
         raise _CliConfigError(
@@ -424,7 +428,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except _CliConfigError as exc:
-        print(json.dumps(_render_failure(exc), indent=2, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps(_render_failure(exc), indent=2, sort_keys=True), file=sys.stderr
+        )
         return 2
     except Exception as exc:
         failure = _render_failure(

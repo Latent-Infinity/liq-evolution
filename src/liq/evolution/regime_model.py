@@ -118,4 +118,3 @@ class RegimeModel:
                 "RegimeWeights length must match number of experts: "
                 f"{len(self.weights)} != {len(self.experts)}"
             )
-

@@ -92,8 +92,12 @@ class TestStageAOnly:
             "outside_stage_b_budget",
             "promoted_top_k",
         }
-        assert result[0].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
-        assert result[1].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
+        assert (
+            result[0].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
+        )
+        assert (
+            result[1].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
+        )
         assert stage_a.call_count == 1
 
     def test_passthrough_does_not_call_stage_b(self) -> None:
@@ -361,16 +365,34 @@ class TestLoggingContract:
         evaluator = TwoStageFitnessEvaluator(stage_a=stage_a, top_k=1)
 
         with caplog.at_level(logging.INFO, logger="liq.evolution.fitness.two_stage"):
-            evaluator.evaluate(["p1", "p2"], {"run_id": "run-two-stage", "x": np.array([1.0])})
+            evaluator.evaluate(
+                ["p1", "p2"], {"run_id": "run-two-stage", "x": np.array([1.0])}
+            )
 
         messages = [record.getMessage() for record in caplog.records]
         assert any(
             "two-stage stage_a_complete run_id=run-two-stage candidates=2" in message
             for message in messages
         )
-        assert any("two-stage no_stage_b run_id=run-two-stage" in message for message in messages)
-        assert len([message for message in messages if "two-stage gate_decision" in message]) == 2
-        assert all("candidate_hash=" in message for message in messages if "gate_decision" in message)
+        assert any(
+            "two-stage no_stage_b run_id=run-two-stage" in message
+            for message in messages
+        )
+        assert (
+            len(
+                [
+                    message
+                    for message in messages
+                    if "two-stage gate_decision" in message
+                ]
+            )
+            == 2
+        )
+        assert all(
+            "candidate_hash=" in message
+            for message in messages
+            if "gate_decision" in message
+        )
 
     def test_stage_b_path_emits_selection_and_completion_logs(self, caplog) -> None:
         stage_a = _MockEvaluator([_fr(0.4), _fr(0.9), _fr(0.2)])
@@ -378,15 +400,22 @@ class TestLoggingContract:
         evaluator = TwoStageFitnessEvaluator(stage_a=stage_a, stage_b=stage_b, top_k=1)
 
         with caplog.at_level(logging.INFO, logger="liq.evolution.fitness.two_stage"):
-            evaluator.evaluate(["p1", "p2", "p3"], {"run_id": "run-two-stage-b", "x": np.array([1.0])})
+            evaluator.evaluate(
+                ["p1", "p2", "p3"], {"run_id": "run-two-stage-b", "x": np.array([1.0])}
+            )
 
         messages = [record.getMessage() for record in caplog.records]
         assert any(
-            "two-stage selection_complete run_id=run-two-stage-b candidates=3 promoted=1" in message
+            "two-stage selection_complete run_id=run-two-stage-b candidates=3 promoted=1"
+            in message
             for message in messages
         )
-        assert any("two-stage stage_b_complete run_id=run-two-stage-b promoted=1" in message for message in messages)
         assert any(
-            "two-stage gate_decision run_id=run-two-stage-b" in message and "stage=stage_b" in message
+            "two-stage stage_b_complete run_id=run-two-stage-b promoted=1" in message
+            for message in messages
+        )
+        assert any(
+            "two-stage gate_decision run_id=run-two-stage-b" in message
+            and "stage=stage_b" in message
             for message in messages
         )

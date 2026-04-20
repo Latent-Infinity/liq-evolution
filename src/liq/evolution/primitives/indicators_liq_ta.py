@@ -58,6 +58,19 @@ def _get_lq_indicator_metadata(name: str) -> dict[str, Any]:
 
 # Candlestick patterns all take (open, high, low, close)
 _CDL_PREFIX = "cdl_"
+_REGISTRY_INDICATOR_ALIASES = {
+    "bbands": "bollinger",
+}
+_INDICATOR_INPUT_OVERRIDES: dict[str, list[str]] = {
+    "atr": ["high", "low", "close"],
+    "ad": ["high", "low", "close", "volume"],
+    "adxr": ["high", "low", "close"],
+    "cci": ["high", "low", "close"],
+    "donchian": ["high", "low"],
+    "mfi": ["high", "low", "close", "volume"],
+    "obv": ["close", "volume"],
+    "vwap": ["high", "low", "close", "volume"],
+}
 
 
 def _legacy_output_suffix(indicator: str, output: str) -> str:
@@ -145,10 +158,27 @@ def _normalize_indicator_name(name: str) -> str:
     return lower
 
 
+def _canonical_registry_indicator_name(name: str) -> str:
+    """Return the registry-facing canonical indicator root name."""
+    normalized = _normalize_indicator_name(name)
+    return _REGISTRY_INDICATOR_ALIASES.get(normalized, normalized)
+
+
+def _normalize_indicator_inputs(name: str, inputs: list[str]) -> list[str]:
+    """Map generic metadata inputs to the exact GP primitive arity expected."""
+    normalized = _canonical_registry_indicator_name(name)
+    if inputs == ["prices"]:
+        return list(_INDICATOR_INPUT_OVERRIDES.get(normalized, ["close"]))
+    if normalized in _INDICATOR_INPUT_OVERRIDES and inputs == ["close"]:
+        return list(_INDICATOR_INPUT_OVERRIDES[normalized])
+    return inputs
+
+
 def _candidate_name_aliases(name: str) -> list[str]:
     """Return canonical primitive root names."""
-    normalized = _normalize_indicator_name(name)
-    aliases = {normalized}
+    raw = name.lower().removeprefix("ta_")
+    normalized = _canonical_registry_indicator_name(name)
+    aliases = {normalized, raw}
 
     parts = normalized.split("_")
     if len(parts) > 2 and parts[0] == parts[1]:
@@ -297,7 +327,9 @@ class LiqFeaturesBackend:
         output_index = kwargs.pop("output_index", 0)
 
         if kwargs:
-            raise TypeError(f"Unsupported kwargs for LiqFeaturesBackend: {sorted(kwargs)}")
+            raise TypeError(
+                f"Unsupported kwargs for LiqFeaturesBackend: {sorted(kwargs)}"
+            )
 
         meta = self._get_indicator_meta(name)
         normalized = _normalize_indicator_name(name)
@@ -454,7 +486,9 @@ def _make_param_specs_from_metadata(
     # If available, use lq indicator defaults for missing entries.
     if indicator_name and not has_explicit_default_params:
         try:
-            for raw_name, value in dict(_get_lq_indicator(indicator_name).default_params).items():
+            for raw_name, value in dict(
+                _get_lq_indicator(indicator_name).default_params
+            ).items():
                 canonical_name = _canonical_param_name(raw_name)
                 if canonical_name and canonical_name not in defaults:
                     coerced = _coerce_default_value(canonical_name, value)
@@ -905,17 +939,13 @@ def _backend_candlestick_patterns(backend: Any) -> list[str]:
     """Resolve candlestick discovery source from a backend wrapper."""
     if isinstance(backend, LiqFeaturesBackend):
         return sorted(
-            name
-            for name in backend._indicators
-            if name.startswith(_CDL_PREFIX)
+            name for name in backend._indicators if name.startswith(_CDL_PREFIX)
         )
 
     nested_backend = getattr(backend, "_backend", None)
     if isinstance(nested_backend, LiqFeaturesBackend):
         return sorted(
-            name
-            for name in nested_backend._indicators
-            if name.startswith(_CDL_PREFIX)
+            name for name in nested_backend._indicators if name.startswith(_CDL_PREFIX)
         )
 
     patterns = getattr(backend, "_candlestick_patterns", None)
@@ -1061,10 +1091,8 @@ def register_liq_ta_indicators(
 
     # Register standard indicators
     for name, meta in indicators_meta.items():
-        root_name = _normalize_indicator_name(name)
-        inputs = list(meta["inputs"])
-        if root_name == "atr" and inputs == ["close"]:
-            inputs = ["high", "low", "close"]
+        root_name = _canonical_registry_indicator_name(name)
+        inputs = _normalize_indicator_inputs(name, list(meta["inputs"]))
         outputs = meta["outputs"]
         input_types = tuple(Series for _ in inputs)
         try:
@@ -1076,10 +1104,16 @@ def register_liq_ta_indicators(
             if "outputs" not in metadata:
                 metadata["outputs"] = outputs
         except Exception:
-            metadata = {"name": root_name, "params": meta["params"], "outputs": outputs}
+            metadata = {
+                "name": root_name,
+                "params": meta.get("params", []),
+                "parameters": meta.get("parameters", []),
+                "default_params": meta.get("default_params", {}),
+                "outputs": outputs,
+            }
 
         param_specs = _make_param_specs_from_metadata(metadata)
-        name_aliases = _candidate_name_aliases(root_name)
+        name_aliases = _candidate_name_aliases(name)
         output_type = BoolSeries if root_name in candlestick_patterns else Series
 
         if len(outputs) == 1:
@@ -1114,7 +1148,11 @@ def register_liq_ta_indicators(
                 )
                 output_aliases = _candidate_output_aliases(root_name, out_name)
                 output_aliases_normalized = sorted(
-                    {_build_primitive_name(alias, out_alias) for alias in name_aliases for out_alias in output_aliases}
+                    {
+                        _build_primitive_name(alias, out_alias)
+                        for alias in name_aliases
+                        for out_alias in output_aliases
+                    }
                 )
                 _register_aliases(
                     primitive_names=output_aliases_normalized,

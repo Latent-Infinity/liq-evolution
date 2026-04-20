@@ -85,7 +85,9 @@ class RejectionEvent:
         require_known_rejection_reason(self.code)
         if not isinstance(self.stage, str) or not self.stage:
             raise ValueError("stage must be a non-empty string")
-        if not isinstance(self.penalty, (int, float)) or not math.isfinite(self.penalty):
+        if not isinstance(self.penalty, (int, float)) or not math.isfinite(
+            self.penalty
+        ):
             raise ValueError("penalty must be a finite numeric value")
         if float(self.penalty) < 0.0:
             raise ValueError("penalty must be non-negative")
@@ -103,7 +105,9 @@ class RejectionEvent:
         return cls(
             code=str(payload.get("code", "")),
             stage=str(payload.get("stage", "unknown")),
-            detail=payload.get("detail") if isinstance(payload.get("detail"), str) else None,
+            detail=payload.get("detail")
+            if isinstance(payload.get("detail"), str)
+            else None,
             penalty=float(payload.get("penalty", 0.0) or 0.0),
         )
 
@@ -215,7 +219,9 @@ class EvolutionRunArtifact:
             split_metrics[str(split_key)] = {
                 str(name): float(value)
                 for name, value in metrics.items()
-                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+                if isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
             }
 
         return {
@@ -231,9 +237,9 @@ class EvolutionRunArtifact:
         }
 
     def to_json_bytes(self) -> bytes:
-        return json.dumps(self.to_payload(), sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        return json.dumps(
+            self.to_payload(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> EvolutionRunArtifact:
@@ -278,7 +284,9 @@ class EvolutionRunArtifact:
         return cls(
             schema_version=str(payload.get("schema_version", ARTIFACT_SCHEMA_VERSION)),
             run_id=str(payload.get("run_id", "")),
-            protocol_version=str(payload.get("protocol_version", EVOLUTION_PROTOCOL_VERSION)),
+            protocol_version=str(
+                payload.get("protocol_version", EVOLUTION_PROTOCOL_VERSION)
+            ),
             created_at_utc=str(payload.get("created_at_utc", _utc_now())),
             dependency_fingerprint=fingerprint,
             selected_candidate_ids=tuple(str(item) for item in raw_selected),

@@ -100,7 +100,14 @@ def _qd_parent_source(
     coverage_weight: float = 0.3,
     coverage_interval: int = 1,
 ) -> Callable[
-    [list[Any], list[FitnessResult], GPConfig, np.random.Generator, int, SelectionContext],
+    [
+        list[Any],
+        list[FitnessResult],
+        GPConfig,
+        np.random.Generator,
+        int,
+        SelectionContext,
+    ],
     list[Any],
 ]:
     generation = 0

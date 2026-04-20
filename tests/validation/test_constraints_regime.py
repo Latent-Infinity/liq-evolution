@@ -42,7 +42,9 @@ def test_constraint_policy_emits_explainable_robustness_reasons() -> None:
 
 
 def test_constraint_policy_staged_rollout_adjusts_thresholds() -> None:
-    payload = {"metrics": {"regime_coverage": 0.55, "turnover": 0.54, "max_drawdown": 0.23}}
+    payload = {
+        "metrics": {"regime_coverage": 0.55, "turnover": 0.54, "max_drawdown": 0.23}
+    }
     canary = ConstraintPolicy(
         robustness_rollout="canary",
         regime_coverage_floor=0.60,

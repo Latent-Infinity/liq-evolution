@@ -101,7 +101,19 @@ def test_summarize_regime_participation_is_fold_scoped() -> None:
         WalkForwardSplit(train=slice(0, 4), validate=slice(4, 6), test=slice(6, 8)),
         WalkForwardSplit(train=slice(2, 6), validate=slice(6, 9), test=slice(9, 11)),
     ]
-    regime_series = ["trend", "trend", "trend", "trend", "range", "trend", "range", "trend", "trend", "trend", "range"]
+    regime_series = [
+        "trend",
+        "trend",
+        "trend",
+        "trend",
+        "range",
+        "trend",
+        "range",
+        "trend",
+        "trend",
+        "trend",
+        "range",
+    ]
     summaries = summarize_regime_participation(splits, regime_series)
 
     assert summaries[0] == {"range": 2, "trend": 6}
@@ -246,7 +258,9 @@ def test_build_walk_forward_splits_anchored_shuffle_is_deterministic() -> None:
 
 
 def test_summarize_regime_participation_requires_non_empty_regime_series() -> None:
-    splits = [WalkForwardSplit(train=slice(0, 2), validate=slice(2, 3), test=slice(3, 4))]
+    splits = [
+        WalkForwardSplit(train=slice(0, 2), validate=slice(2, 3), test=slice(3, 4))
+    ]
 
     with pytest.raises(ValueError, match="regime_series must be non-empty"):
         summarize_regime_participation(splits, [])
@@ -256,7 +270,16 @@ def test_summarize_regime_participation_accepts_regime_mapping() -> None:
     splits = [
         WalkForwardSplit(train=slice(0, 4), validate=slice(4, 6), test=slice(6, 8)),
     ]
-    regime_series = {0: "trend", 1: "trend", 2: "trend", 3: "trend", 4: "trend", 5: "range", 6: "trend", 7: "trend"}
+    regime_series = {
+        0: "trend",
+        1: "trend",
+        2: "trend",
+        3: "trend",
+        4: "trend",
+        5: "range",
+        6: "trend",
+        7: "trend",
+    }
 
     summaries = summarize_regime_participation(splits, regime_series)
 

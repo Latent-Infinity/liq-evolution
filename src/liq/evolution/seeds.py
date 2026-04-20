@@ -131,8 +131,7 @@ def build_seed_champion_payload(
 ) -> dict[str, Any]:
     """Build a portable JSON payload for champion/external seed programs."""
     entries = [
-        {"source": source, "program": serialize(program)}
-        for program in programs
+        {"source": source, "program": serialize(program)} for program in programs
     ]
     return {"schema_version": "1.0", "seed_programs": entries}
 

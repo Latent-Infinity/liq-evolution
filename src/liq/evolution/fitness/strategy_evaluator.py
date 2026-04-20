@@ -215,7 +215,9 @@ class StrategyEvaluator:
                 )
 
         self._config = StrategyEvaluatorConfig(
-            objective_directions=cast(tuple[ObjectiveDirection, ...], objective_directions),
+            objective_directions=cast(
+                tuple[ObjectiveDirection, ...], objective_directions
+            ),
             split_weights=(
                 split_weight_values["train"],
                 split_weight_values["validate"],

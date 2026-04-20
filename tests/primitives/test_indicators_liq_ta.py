@@ -308,7 +308,9 @@ class TestLiqFeaturesBackend:
         by_group = backend.list_indicators(category="trend")
         assert isinstance(by_group, list)
 
-    def test_candlestick_registration_only_uses_available_liq_features_names(self) -> None:
+    def test_candlestick_registration_only_uses_available_liq_features_names(
+        self,
+    ) -> None:
         backend = LiqFeaturesBackend()
         patterns = _backend_candlestick_patterns(backend)
         available = set(backend.list_indicators())
@@ -474,7 +476,10 @@ class TestIndicatorHelperFunctions:
             _backend_indicators(SimpleNamespace()),
             dict,
         )
-        assert _backend_candlestick_patterns(SimpleNamespace(_candlestick_patterns=[])) == []
+        assert (
+            _backend_candlestick_patterns(SimpleNamespace(_candlestick_patterns=[]))
+            == []
+        )
         nested = SimpleNamespace(_backend=SimpleNamespace())
         assert isinstance(_backend_candlestick_patterns(nested), list)
         assert len(_backend_candlestick_patterns(nested)) > 0
@@ -593,7 +598,9 @@ class TestCallableFactories:
             np.array([6.0, 6.0]),
         )
 
-        def _fn_four(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> np.ndarray:
+        def _fn_four(
+            a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray
+        ) -> np.ndarray:
             return a + b + c + d
 
         wrapped_four = _make_single_output_callable(_fn_four, 4, supports_out=False)
@@ -654,7 +661,9 @@ class TestCallableFactories:
     ) -> None:
         class Backend:
             def __init__(self) -> None:
-                self.calls: list[tuple[str, dict[str, Any], dict[str, np.ndarray], Any]] = []
+                self.calls: list[
+                    tuple[str, dict[str, Any], dict[str, np.ndarray], Any]
+                ] = []
 
             def compute(
                 self,

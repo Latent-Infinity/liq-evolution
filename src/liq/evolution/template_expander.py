@@ -51,17 +51,13 @@ class CFGLiteTemplateExpander:
         self._registry = registry
         self._rng = np.random.default_rng(seed)
         all_templates: dict[_RoleName, tuple[str, ...]] = {
-            "detector": tuple(
-                list_seed_templates_by_role(SeedTemplateRole.detector)
-            ),
+            "detector": tuple(list_seed_templates_by_role(SeedTemplateRole.detector)),
             "gate": tuple(list_seed_templates_by_role(SeedTemplateRole.detector)),
             "expert": tuple(list_seed_templates_by_role(SeedTemplateRole.expert)),
             "risk": tuple(list_seed_templates_by_role(SeedTemplateRole.risk)),
         }
         self._templates: dict[_RoleName, tuple[str, ...]] = {
-            role: tuple(
-                name for name in templates if self._can_build_template(name)
-            )
+            role: tuple(name for name in templates if self._can_build_template(name))
             for role, templates in all_templates.items()
         }
 
@@ -72,8 +68,7 @@ class CFGLiteTemplateExpander:
                 raise ValueError(f"no templates available for role {role!r}")
 
         self._probabilities: dict[_RoleName, dict[str, float]] = {
-            role: self._uniform_role_probabilities(role)
-            for role in self._templates
+            role: self._uniform_role_probabilities(role) for role in self._templates
         }
 
     def _can_build_template(self, template_name: str) -> bool:
@@ -214,8 +209,7 @@ class CFGLiteTemplateExpander:
         detector_template = self._choose_template("detector")
         gate_template = self._choose_template("gate")
         expert_templates = tuple(
-            self._choose_template("expert")
-            for _ in range(expert_count)
+            self._choose_template("expert") for _ in range(expert_count)
         )
         risk_template = self._choose_template("risk") if include_risk else None
 

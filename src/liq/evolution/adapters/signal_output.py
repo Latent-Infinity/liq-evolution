@@ -74,5 +74,7 @@ class GPSignalOutput:
             )
         if not isinstance(self.metadata, dict):
             raise TypeError("metadata must be a dict")
-        if self.regime_state is not None and not isinstance(self.regime_state, RegimeState):
+        if self.regime_state is not None and not isinstance(
+            self.regime_state, RegimeState
+        ):
             raise TypeError("regime_state must be a RegimeState when provided")

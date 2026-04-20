@@ -127,7 +127,11 @@ class TestBuildGPConfig:
         assert scheduler.eval_batch_size >= 1
         assert scheduler.memory_budget_mb >= 128
         assert scheduler.safe_fallback_mode in {"sequential", "fail"}
-        assert meta["reason_code"] in {"ok", "constraint_saturation", "critical_constraint_saturation"}
+        assert meta["reason_code"] in {
+            "ok",
+            "constraint_saturation",
+            "critical_constraint_saturation",
+        }
 
     def test_policy_mapping_saturates_to_safe_fallback(self) -> None:
         evo = EvolutionConfig(

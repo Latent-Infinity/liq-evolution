@@ -142,7 +142,9 @@ class TestStage2PromotionGate:
         assert result[3].metadata["reason_code"] == "below_stage_a_threshold"
 
     def test_min_candidates_fill_is_explicitly_reasoned(self) -> None:
-        stage_a = _PresetEvaluator([_fr(0.9, stage="a"), _fr(0.6, stage="a"), _fr(0.4, stage="a")])
+        stage_a = _PresetEvaluator(
+            [_fr(0.9, stage="a"), _fr(0.6, stage="a"), _fr(0.4, stage="a")]
+        )
         stage_b = _PresetEvaluator([_fr(0.91, stage="b"), _fr(0.61, stage="b")])
         evaluator = TwoStageFitnessEvaluator(
             stage_a=stage_a,
@@ -159,14 +161,20 @@ class TestStage2PromotionGate:
         assert result[2].metadata["reason_code"] == "below_stage_a_threshold"
 
     def test_gate_output_contains_lineage_and_reason_codes(self) -> None:
-        stage_a = _PresetEvaluator([_fr(float("nan"), stage="a"), _fr(0.8, stage="a"), _fr(0.7, stage="a")])
+        stage_a = _PresetEvaluator(
+            [_fr(float("nan"), stage="a"), _fr(0.8, stage="a"), _fr(0.7, stage="a")]
+        )
         stage_b = _PresetEvaluator([_fr(0.85, stage="b"), _fr(0.75, stage="b")])
         evaluator = TwoStageFitnessEvaluator(stage_a=stage_a, stage_b=stage_b, top_k=2)
 
         result = evaluator.evaluate(["p0", "p1", "p2"], {"x": np.array([1.0])})
         assert result[0].metadata["reason_code"] == "stage_a_non_finite"
-        assert result[1].metadata["two_stage_gate"]["lineage"]["final_stage"] == "stage_b"
-        assert result[2].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
+        assert (
+            result[1].metadata["two_stage_gate"]["lineage"]["final_stage"] == "stage_b"
+        )
+        assert (
+            result[2].metadata["two_stage_gate"]["lineage"]["source_stage"] == "stage_a"
+        )
 
     def test_no_promotions_returns_annotated_stage_a_results(self) -> None:
         stage_a = _PresetEvaluator(
@@ -226,7 +234,9 @@ class TestStage2GateEvaluatorDispatch:
                 del context
                 return [_fr(0.6, stage="a") for _ in programs]
 
-        evaluator = TwoStageFitnessEvaluator(stage_a=_FitnessOnly(), stage_b=None, top_k=1)
+        evaluator = TwoStageFitnessEvaluator(
+            stage_a=_FitnessOnly(), stage_b=None, top_k=1
+        )
         result = evaluator.evaluate(["p0"], {"x": np.array([1.0])})
         assert result[0].objectives == (0.6,)
 
@@ -237,7 +247,9 @@ class TestStage2GateEvaluatorDispatch:
             del context
             return [_fr(0.4, stage="a") for _ in programs]
 
-        evaluator = TwoStageFitnessEvaluator(stage_a=_callable_stage_a, stage_b=None, top_k=1)
+        evaluator = TwoStageFitnessEvaluator(
+            stage_a=_callable_stage_a, stage_b=None, top_k=1
+        )
         result = evaluator.evaluate(["p0"], {"x": np.array([1.0])})
         assert result[0].objectives == (0.4,)
 

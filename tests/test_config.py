@@ -214,11 +214,15 @@ class TestEvolutionRunConfig:
             EvolutionRunConfig(stage_a_candidate_budget=0)
 
     def test_stage_a_min_candidates_rejects_nonpositive(self) -> None:
-        with pytest.raises(ConfigurationError, match="stage_a_min_candidates must be >= 1"):
+        with pytest.raises(
+            ConfigurationError, match="stage_a_min_candidates must be >= 1"
+        ):
             EvolutionRunConfig(stage_a_min_candidates=0)
 
     def test_stage_b_min_candidates_rejects_nonpositive(self) -> None:
-        with pytest.raises(ConfigurationError, match="stage_b_min_candidates must be >= 1"):
+        with pytest.raises(
+            ConfigurationError, match="stage_b_min_candidates must be >= 1"
+        ):
             EvolutionRunConfig(stage_b_min_candidates=0)
 
     def test_protocol_version_rejects_unknown_schema(self) -> None:
@@ -357,7 +361,9 @@ class TestGPConfig:
         assert cfg.seed_injection.count == 8
 
     def test_invalid_constant_opt_mode_rejected(self) -> None:
-        with pytest.raises((ConfigurationError, ValidationError), match="constant_opt_mode"):
+        with pytest.raises(
+            (ConfigurationError, ValidationError), match="constant_opt_mode"
+        ):
             GPConfig(constant_opt_mode=cast(Any, "bad"))
 
     def test_constant_opt_max_evals_rejects_nonpositive(self) -> None:

@@ -20,12 +20,18 @@ class FeatureContext:
     def __init__(self, backend: IndicatorBackend) -> None:
         self._backend = backend
         self._cache: dict[
-            tuple[str, tuple[tuple[str, Any], ...], tuple[tuple[str, int, tuple[int, ...]], ...]],
+            tuple[
+                str,
+                tuple[tuple[str, Any], ...],
+                tuple[tuple[str, int, tuple[int, ...]], ...],
+            ],
             np.ndarray,
         ] = {}
 
     @staticmethod
-    def _data_signature(data: dict[str, np.ndarray]) -> tuple[tuple[str, int, tuple[int, ...]], ...]:
+    def _data_signature(
+        data: dict[str, np.ndarray],
+    ) -> tuple[tuple[str, int, tuple[int, ...]], ...]:
         signature: list[tuple[str, int, tuple[int, ...]]] = []
         for name, value in sorted(data.items()):
             arr = np.asarray(value)

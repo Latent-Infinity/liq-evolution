@@ -151,7 +151,10 @@ class TestPrimitiveRegistryProtocol:
 
         reg = MinimalRegistry()
         # Call through the protocol default
-        assert PrimitiveRegistry.lookup(cast(PrimitiveRegistry, reg), "test") == "found:test"
+        assert (
+            PrimitiveRegistry.lookup(cast(PrimitiveRegistry, reg), "test")
+            == "found:test"
+        )
 
 
 class TestCandidateProtocolContracts:
@@ -186,12 +189,16 @@ class TestCandidateProtocolContracts:
         class Evaluator:
             protocol_version = "1.0"
 
-            def evaluate_candidate(self, candidate: CandidateArtifact, context: dict[str, object]) -> bool:
+            def evaluate_candidate(
+                self, candidate: CandidateArtifact, context: dict[str, object]
+            ) -> bool:
                 return True
 
         evaluator = Evaluator()
         assert isinstance(evaluator, CandidateEvaluator)
-        require_protocol_version("candidate", evaluator.protocol_version, GP_PROTOCOL_VERSION)
+        require_protocol_version(
+            "candidate", evaluator.protocol_version, GP_PROTOCOL_VERSION
+        )
 
     def test_evolution_artifact_store_protocol(self) -> None:
         class Store:

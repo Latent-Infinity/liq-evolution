@@ -38,7 +38,9 @@ def build_walk_forward_splits(
     if step_size <= 0:
         raise ValueError("step_size must be positive")
     if embargo_bars < 0 or purge_bars < 0 or label_lookahead_bars < 0:
-        raise ValueError("embargo_bars, purge_bars, and label_lookahead_bars must be non-negative")
+        raise ValueError(
+            "embargo_bars, purge_bars, and label_lookahead_bars must be non-negative"
+        )
 
     if not anchored:
         splits = generate_walk_forward_splits(
@@ -51,7 +53,9 @@ def build_walk_forward_splits(
             label_lookahead_bars=label_lookahead_bars,
         )
         if shuffle_folds:
-            rng = random.Random(deterministic_seed if deterministic_seed is not None else 0)
+            rng = random.Random(
+                deterministic_seed if deterministic_seed is not None else 0
+            )
             splits = sorted(splits, key=lambda split: split.slice_id)
             rng.shuffle(splits)
         return splits

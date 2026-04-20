@@ -156,11 +156,15 @@ class TestSeedInjectionCadenceStage15:
         with pytest.raises(ValueError, match="pool_size must be >= 1"):
             select_seed_champion_pool(population, fitnesses, pool_size=0)
         with pytest.raises(ValueError, match="objective_index must be >= 0"):
-            select_seed_champion_pool(population, fitnesses, pool_size=1, objective_index=-1)
+            select_seed_champion_pool(
+                population, fitnesses, pool_size=1, objective_index=-1
+            )
         with pytest.raises(ValueError, match="matching lengths"):
             select_seed_champion_pool(population, fitnesses[:1], pool_size=1)
         with pytest.raises(ValueError, match="objective 1"):
-            select_seed_champion_pool(population, fitnesses, pool_size=1, objective_index=1)
+            select_seed_champion_pool(
+                population, fitnesses, pool_size=1, objective_index=1
+            )
         with pytest.raises(ValueError, match="objective_direction"):
             select_seed_champion_pool(
                 population,
@@ -227,14 +231,20 @@ class TestExternalSeedPayloadStage15:
         seed = TerminalNode(name="seed", output_type=BoolSeries)
         seed_payload = serialize(seed)
 
-        with pytest.raises(ConfigurationError, match="Unsupported external seed payload"):
+        with pytest.raises(
+            ConfigurationError, match="Unsupported external seed payload"
+        ):
             validate_external_seed_payload({"unknown": 1}, registry, strict=True)
 
         with pytest.raises(ConfigurationError, match="'seed_programs' must be a list"):
-            validate_external_seed_payload({"seed_programs": "bad"}, registry, strict=True)
+            validate_external_seed_payload(
+                {"seed_programs": "bad"}, registry, strict=True
+            )
 
         with pytest.raises(ConfigurationError, match="'pareto_front' must be a list"):
-            validate_external_seed_payload({"pareto_front": "bad"}, registry, strict=True)
+            validate_external_seed_payload(
+                {"pareto_front": "bad"}, registry, strict=True
+            )
 
         with pytest.raises(
             ConfigurationError,
@@ -242,45 +252,63 @@ class TestExternalSeedPayloadStage15:
         ):
             validate_external_seed_payload([1], registry, strict=True)
 
-        with pytest.raises(ConfigurationError, match="invalid external seed entry at index 0"):
+        with pytest.raises(
+            ConfigurationError, match="invalid external seed entry at index 0"
+        ):
             validate_external_seed_payload([{"program": "bad"}], registry, strict=True)
 
         missing = tmp_path / "missing.json"
-        with pytest.raises(ConfigurationError, match="Failed to read external seed payload"):
+        with pytest.raises(
+            ConfigurationError, match="Failed to read external seed payload"
+        ):
             validate_external_seed_payload(missing, registry, strict=True)
         assert validate_external_seed_payload(missing, registry, strict=False) == []
 
         invalid_json = tmp_path / "invalid.json"
         invalid_json.write_text("{not-json", encoding="utf-8")
-        with pytest.raises(ConfigurationError, match="Invalid JSON external seed payload"):
+        with pytest.raises(
+            ConfigurationError, match="Invalid JSON external seed payload"
+        ):
             validate_external_seed_payload(invalid_json, registry, strict=True)
 
-        with pytest.raises(ConfigurationError, match="Invalid JSON external seed payload string"):
+        with pytest.raises(
+            ConfigurationError, match="Invalid JSON external seed payload string"
+        ):
             validate_external_seed_payload("{bad-json", registry, strict=True)
         assert validate_external_seed_payload("{bad-json", registry, strict=False) == []
 
-        assert _terminal_names(validate_external_seed_payload(
-            {"best_program": seed_payload},
-            registry,
-            strict=True,
-        )) == ["seed"]
-        assert _terminal_names(validate_external_seed_payload(
-            {"entry_program": seed_payload},
-            registry,
-            strict=True,
-        )) == ["seed"]
-        assert _terminal_names(validate_external_seed_payload(
-            {"pareto_front": [seed_payload]},
-            registry,
-            strict=True,
-        )) == ["seed"]
-        assert _terminal_names(validate_external_seed_payload(
-            {"program": seed_payload},
-            registry,
-            strict=True,
-        )) == ["seed"]
+        assert _terminal_names(
+            validate_external_seed_payload(
+                {"best_program": seed_payload},
+                registry,
+                strict=True,
+            )
+        ) == ["seed"]
+        assert _terminal_names(
+            validate_external_seed_payload(
+                {"entry_program": seed_payload},
+                registry,
+                strict=True,
+            )
+        ) == ["seed"]
+        assert _terminal_names(
+            validate_external_seed_payload(
+                {"pareto_front": [seed_payload]},
+                registry,
+                strict=True,
+            )
+        ) == ["seed"]
+        assert _terminal_names(
+            validate_external_seed_payload(
+                {"program": seed_payload},
+                registry,
+                strict=True,
+            )
+        ) == ["seed"]
 
-        with pytest.raises(ConfigurationError, match="Unsupported external seed payload"):
+        with pytest.raises(
+            ConfigurationError, match="Unsupported external seed payload"
+        ):
             validate_external_seed_payload(123, registry, strict=True)
 
 
@@ -459,7 +487,9 @@ class TestChampionInjectionStage15:
             population,
             fitnesses,
             generation=1,
-            cadence=SeedInjectionCadence(interval=1, method="direct", injection_count=2),
+            cadence=SeedInjectionCadence(
+                interval=1, method="direct", injection_count=2
+            ),
             gp_config=gp_config,
             registry=PrimitiveRegistry(),
             rng=rng,

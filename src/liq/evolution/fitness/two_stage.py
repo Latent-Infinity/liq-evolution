@@ -285,11 +285,7 @@ class TwoStageFitnessEvaluator:
 
         scores = [self._stage_a_score(result) for result in stage_a_results]
         finite_ranked = sorted(
-            [
-                idx
-                for idx, score in enumerate(scores)
-                if math.isfinite(score)
-            ],
+            [idx for idx, score in enumerate(scores) if math.isfinite(score)],
             key=lambda idx: (-scores[idx], idx),
         )
         reasons: dict[int, str] = {

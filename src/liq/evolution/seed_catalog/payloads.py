@@ -120,7 +120,9 @@ def _regime_v2_seed_payloads() -> list[dict[str, Any]]:
         _constant(50.0),
     )
     range_bounded = _function("clip", range_raw, _constant(-0.35), _constant(0.35))
-    seed1 = _wrapped(_function("if_then_else", strong_trend, trend_bounded, range_bounded))
+    seed1 = _wrapped(
+        _function("if_then_else", strong_trend, trend_bounded, range_bounded)
+    )
 
     rocr8 = _parameterized("ta_rocr", close, period=8)
     momentum = _function("sub", rocr8, _constant(1.0))
@@ -142,11 +144,15 @@ def _regime_v2_seed_payloads() -> list[dict[str, Any]]:
     fast_bounded = _function("clip", fast_spread, _constant(-0.25), _constant(0.25))
     pullback = _function("div", _function("sub", ema48, close), close)
     pullback_bounded = _function("clip", pullback, _constant(-0.20), _constant(0.20))
-    seed3 = _wrapped(_function("if_then_else", persistent, fast_bounded, pullback_bounded))
+    seed3 = _wrapped(
+        _function("if_then_else", persistent, fast_bounded, pullback_bounded)
+    )
 
     atr_rank = _parameterized("percentile_rank", atr_pct, period=40)
     high_vol = _function("gt", atr_rank, _constant(70.0))
-    shock_raw = _function("div", _function("sub", rocr8, _constant(1.0)), _constant(0.03))
+    shock_raw = _function(
+        "div", _function("sub", rocr8, _constant(1.0)), _constant(0.03)
+    )
     shock_bounded = _function("clip", shock_raw, _constant(-0.50), _constant(0.50))
     quiet_raw = _function(
         "div",
@@ -162,7 +168,9 @@ def _regime_v2_seed_payloads() -> list[dict[str, Any]]:
     bull_bounded = _function("clip", bull_raw, _constant(0.0), _constant(0.30))
     bear_raw = _function("div", _function("sub", ema48, close), close)
     bear_bounded = _function("clip", bear_raw, _constant(-0.25), _constant(0.25))
-    seed5 = _wrapped(_function("if_then_else", above_long_term, bull_bounded, bear_bounded))
+    seed5 = _wrapped(
+        _function("if_then_else", above_long_term, bull_bounded, bear_bounded)
+    )
 
     return [seed1, seed2, seed3, seed4, seed5]
 
@@ -212,13 +220,17 @@ def _regime_v3_seed_payloads() -> list[dict[str, Any]]:
 
     falling_fast = _parameterized("is_falling", ema20, period=4)
     bear_accel = _function("div", _function("sub", ema48, ema12), close)
-    bear_accel_bounded = _function("clip", bear_accel, _constant(-0.30), _constant(0.30))
+    bear_accel_bounded = _function(
+        "clip", bear_accel, _constant(-0.30), _constant(0.30)
+    )
     trend_resume = _function("div", _function("sub", ema12, ema80), close)
     trend_resume_bounded = _function(
         "clip", trend_resume, _constant(-0.25), _constant(0.25)
     )
     seed3 = _wrapped(
-        _function("if_then_else", falling_fast, bear_accel_bounded, trend_resume_bounded)
+        _function(
+            "if_then_else", falling_fast, bear_accel_bounded, trend_resume_bounded
+        )
     )
 
     low_vol = _function("lt", atr_pct, _constant(0.010))
@@ -238,7 +250,9 @@ def _regime_v3_seed_payloads() -> list[dict[str, Any]]:
     high_vol_bounded = _function(
         "clip", high_vol_breakout, _constant(-0.40), _constant(0.40)
     )
-    seed4 = _wrapped(_function("if_then_else", low_vol, low_vol_bounded, high_vol_bounded))
+    seed4 = _wrapped(
+        _function("if_then_else", low_vol, low_vol_bounded, high_vol_bounded)
+    )
 
     drift = _function("div", _function("sub", close, ema180), ema180)
     trend_scale = _function("div", adx14, _constant(40.0))
@@ -248,8 +262,12 @@ def _regime_v3_seed_payloads() -> list[dict[str, Any]]:
     lag1 = _parameterized("n_bars_ago", close, shift=1)
     up_count = _parameterized("greater_count", close, lag1, period=6)
     down_count = _parameterized("lower_count", close, lag1, period=6)
-    count_balance = _function("div", _function("sub", up_count, down_count), _constant(6.0))
-    seed6 = _wrapped(_function("clip", count_balance, _constant(-0.35), _constant(0.35)))
+    count_balance = _function(
+        "div", _function("sub", up_count, down_count), _constant(6.0)
+    )
+    seed6 = _wrapped(
+        _function("clip", count_balance, _constant(-0.35), _constant(0.35))
+    )
 
     return [seed1, seed2, seed3, seed4, seed5, seed6]
 
@@ -293,7 +311,9 @@ def _regime_v4_seed_payloads() -> list[dict[str, Any]]:
         slow_period=55,
     )
     kama_spread = _function("div", _function("sub", kama21, kama55), close)
-    atr_norm = _function("div", kama_spread, _function("add", atr_pct, _constant(0.004)))
+    atr_norm = _function(
+        "div", kama_spread, _function("add", atr_pct, _constant(0.004))
+    )
     seed2 = _wrapped(_function("clip", atr_norm, _constant(-0.35), _constant(0.35)))
 
     vwap = _parameterized("ta_vwap", high, low, close, volume)

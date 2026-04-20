@@ -94,7 +94,10 @@ class LiqStoreEvolutionArtifactStore:
 
         try:
             parsed = json.loads(raw.decode("utf-8"))
-            if isinstance(parsed, dict) and parsed.get("__artifact_type__") == "generic":
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("__artifact_type__") == "generic"
+            ):
                 return parsed.get("payload")
         except Exception:
             pass

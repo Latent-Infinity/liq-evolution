@@ -20,13 +20,13 @@ EXPECTED_TERMINALS = {
     "volume",
     "log_returns",
     "midrange",
-        "typical_price",
-        "range",
-        "ha_open",
-        "ha_high",
-        "ha_low",
-        "ha_close",
-        "ephemeral_float",
+    "typical_price",
+    "range",
+    "ha_open",
+    "ha_high",
+    "ha_low",
+    "ha_close",
+    "ephemeral_float",
 }
 
 
