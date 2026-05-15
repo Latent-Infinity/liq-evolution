@@ -15,11 +15,11 @@ from liq.evolution import (
     prepare_evaluation_context,
     wire_objectives,
 )
+from liq.evolution.primitives.ops_comparison import register_comparison_ops
 from liq.evolution.primitives.ops_crossover import register_crossover_ops
+from liq.evolution.primitives.ops_logic import register_logic_ops
 from liq.evolution.primitives.ops_numeric import register_numeric_ops
 from liq.evolution.primitives.series_sources import register_series_sources
-from liq.evolution.primitives.ops_comparison import register_comparison_ops
-from liq.evolution.primitives.ops_logic import register_logic_ops
 from liq.gp.primitives.registry import PrimitiveRegistry
 
 

@@ -130,8 +130,7 @@ def build_seed_champion_payload(
 ) -> dict[str, Any]:
     """Build a portable JSON payload for champion/external seed programs."""
     entries = [
-        {"source": source, "program": serialize(program)}
-        for program in programs
+        {"source": source, "program": serialize(program)} for program in programs
     ]
     return {"schema_version": "1.0", "seed_programs": entries}
 
@@ -229,7 +228,7 @@ def validate_external_seed_payload(
             if "schema_version" in entry and "program" in entry:
                 raw_program = entry
             else:
-                raw_program = entry["program"] if "program" in entry else entry
+                raw_program = entry.get("program", entry)
             if not isinstance(raw_program, Mapping):
                 raise ConfigurationError(
                     f"external seed entry at index {index} has invalid 'program' payload"

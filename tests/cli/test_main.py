@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 from liq.evolution.config import EvolutionConfig
 
@@ -93,6 +92,68 @@ def test_cli_config_file_overrides_and_flag_sync(tmp_path: Path, capsys) -> None
     assert out["config"]["regime"]["regime_min_persistence"] == 5
 
 
+def test_cli_all_scalar_overrides_are_reflected(capsys) -> None:
+    exit_code, out, err = _run_cli(
+        [
+            "--population-size",
+            "64",
+            "--max-depth",
+            "5",
+            "--generations",
+            "3",
+            "--seed",
+            "99",
+            "--batch-size",
+            "16",
+            "--full-eval-interval",
+            "4",
+            "--stage-a-threshold",
+            "0.7",
+            "--stage-a-candidate-budget",
+            "111",
+            "--stage-b-candidate-budget",
+            "22",
+            "--stage-a-min-candidates",
+            "3",
+            "--stage-b-min-candidates",
+            "2",
+            "--label-metric",
+            "precision_at_k",
+            "--backtest-top-n",
+            "6",
+            "--backtest-metric",
+            "sortino_ratio",
+            "--regime-confidence-threshold",
+            "0.6",
+            "--regime-occupancy-threshold",
+            "0.2",
+            "--regime-hysteresis-margin",
+            "0.08",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 0
+    assert err == {}
+    assert out["config"]["population_size"] == 64
+    assert out["config"]["max_depth"] == 5
+    assert out["config"]["generations"] == 3
+    assert out["config"]["seed"] == 99
+    assert out["config"]["batch_size"] == 16
+    assert out["config"]["full_eval_interval"] == 4
+    assert out["config"]["run"]["stage_a_threshold"] == 0.7
+    assert out["config"]["run"]["stage_a_candidate_budget"] == 111
+    assert out["config"]["run"]["stage_b_candidate_budget"] == 22
+    assert out["config"]["run"]["stage_a_min_candidates"] == 3
+    assert out["config"]["run"]["stage_b_min_candidates"] == 2
+    assert out["config"]["fitness_stages"]["label_metric"] == "precision_at_k"
+    assert out["config"]["fitness_stages"]["backtest_top_n"] == 6
+    assert out["config"]["fitness_stages"]["backtest_metric"] == "sortino_ratio"
+    assert out["config"]["regime"]["regime_confidence_threshold"] == 0.6
+    assert out["config"]["regime"]["regime_occupancy_threshold"] == 0.2
+    assert out["config"]["regime"]["regime_hysteresis_margin"] == 0.08
+
+
 def test_cli_missing_config_file(tmp_path: Path, capsys) -> None:
     missing = tmp_path / "does-not-exist.json"
     exit_code, out, err = _run_cli(["--config", str(missing)], capsys)
@@ -147,6 +208,50 @@ def test_cli_config_schema_violation(tmp_path: Path, capsys) -> None:
     assert err["error_code"] == "evo.cli.config_schema_violation"
 
 
+def test_cli_unsupported_config_suffix(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "config.txt"
+    config_path.write_text("{}", encoding="utf-8")
+
+    exit_code, out, err = _run_cli(["--config", str(config_path)], capsys)
+
+    assert exit_code == 2
+    assert out == {}
+    assert err["error_code"] == "evo.cli.config_type_unsupported"
+
+
+def test_cli_yaml_config_empty_file_uses_defaults(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "empty.yaml"
+    config_path.write_text("", encoding="utf-8")
+
+    exit_code, out, err = _run_cli(["--config", str(config_path)], capsys)
+
+    assert exit_code == 0
+    assert err == {}
+    assert out["ok"] is True
+
+
+def test_cli_yaml_config_schema_violation(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "bad.yaml"
+    config_path.write_text("- not\n- an\n- object\n", encoding="utf-8")
+
+    exit_code, out, err = _run_cli(["--config", str(config_path)], capsys)
+
+    assert exit_code == 2
+    assert out == {}
+    assert err["error_code"] == "evo.cli.config_schema_violation"
+
+
+def test_cli_yaml_parse_error(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "bad.yaml"
+    config_path.write_text("population_size: [", encoding="utf-8")
+
+    exit_code, out, err = _run_cli(["--config", str(config_path)], capsys)
+
+    assert exit_code == 2
+    assert out == {}
+    assert err["error_code"] == "evo.cli.config_parse_error"
+
+
 def test_cli_stage_b_mismatch(tmp_path: Path, capsys) -> None:
     payload = {
         "fitness_stages": {"use_backtest": True},
@@ -186,6 +291,43 @@ def test_cli_argparse_error(capsys) -> None:
     assert exit_code == 2
     assert out == {}
     assert err["error_code"] == "evo.cli.argparse_error"
+
+
+def test_cli_help_exits_successfully(capsys) -> None:
+    from liq.evolution.cli.main import main
+
+    exit_code = main(["--help"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "liquid evolution experiment and artifact CLI" in captured.out
+    assert captured.err == ""
+
+
+def test_cli_phase4_unexpected_errors_are_structured(tmp_path: Path, capsys) -> None:
+    evidence = tmp_path / "bad-evidence.json"
+    evidence.write_text("{}", encoding="utf-8")
+
+    exit_code, out, err = _run_cli(
+        [
+            "--phase4-evidence-path",
+            str(evidence),
+            "--phase4-output-dir",
+            str(tmp_path / "out"),
+            "--population-size",
+            "10",
+            "--generations",
+            "1",
+            "--max-depth",
+            "2",
+        ],
+        capsys,
+    )
+
+    assert exit_code == 1
+    assert out == {}
+    assert err["error_code"] == "evo.cli.unexpected_error"
+    assert err["context"]["exception"] == "ValueError"
 
 
 def test_cli_script_entrypoint_declared() -> None:

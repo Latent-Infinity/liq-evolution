@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-import math
 
 from liq.evolution.errors import ConfigurationError
-from liq.evolution.protocols import PrimitiveRegistry
 from liq.evolution.program import (
     Program,
     TerminalNode,
 )
+from liq.evolution.protocols import PrimitiveRegistry
 from liq.gp.types import Series
 
 
@@ -24,7 +24,9 @@ class SeedTemplateRole(StrEnum):
     risk = "risk"
 
 
-def _normalize_str_tuple(values: tuple[str, ...] | list[str] | set[str]) -> tuple[str, ...]:
+def _normalize_str_tuple(
+    values: tuple[str, ...] | list[str] | set[str],
+) -> tuple[str, ...]:
     normalized: list[str] = []
     for value in values:
         if not isinstance(value, str):
@@ -73,14 +75,18 @@ class StrategySeedTemplate:
         if not isinstance(self.arity, int) or self.arity < 1:
             raise ValueError("template arity must be a positive integer")
 
-        object.__setattr__(self, "expected_inputs", _normalize_str_tuple(self.expected_inputs))
+        object.__setattr__(
+            self, "expected_inputs", _normalize_str_tuple(self.expected_inputs)
+        )
         if len(self.expected_inputs) != self.arity:
             raise ValueError(
                 "template arity must match expected_inputs length: "
                 f"{self.arity} != {len(self.expected_inputs)}"
             )
 
-        object.__setattr__(self, "regime_hints", _normalize_str_tuple(self.regime_hints))
+        object.__setattr__(
+            self, "regime_hints", _normalize_str_tuple(self.regime_hints)
+        )
         object.__setattr__(
             self,
             "failure_modes",
@@ -89,7 +95,9 @@ class StrategySeedTemplate:
 
         if self.turnover_expectation is not None:
             if not isinstance(self.turnover_expectation, (int, float)):
-                raise TypeError("template turnover_expectation must be numeric when set")
+                raise TypeError(
+                    "template turnover_expectation must be numeric when set"
+                )
             turnover = float(self.turnover_expectation)
             if not math.isfinite(turnover):
                 raise ValueError("template turnover_expectation must be finite")
@@ -110,6 +118,7 @@ def _resolve_primitive(
     seed: str,
 ):
     """Resolve a primitive from the registry with clear context on failure."""
+
     def _candidate_primitive_names(requested: str) -> list[str]:
         lowered = requested.lower()
         candidates: list[str] = []

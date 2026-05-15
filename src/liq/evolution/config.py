@@ -7,9 +7,10 @@ time (fail-fast).  Invalid values raise
 
 from __future__ import annotations
 
-from pathlib import Path
 import math
-from typing import Any, Literal, Mapping, Self
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -231,15 +232,11 @@ class RegimeGateConfig(BaseModel, frozen=True):
                 "regime_confidence_threshold must be in [0.0, 1.0]"
             )
         if not 0.0 <= self.regime_occupancy_threshold <= 1.0:
-            raise ConfigurationError(
-                "regime_occupancy_threshold must be in [0.0, 1.0]"
-            )
+            raise ConfigurationError("regime_occupancy_threshold must be in [0.0, 1.0]")
         if self.regime_hysteresis_margin < 0.0:
             raise ConfigurationError("regime_hysteresis_margin must be >= 0.0")
         if self.regime_min_persistence < 1:
-            raise ConfigurationError(
-                "regime_min_persistence must be >= 1"
-            )
+            raise ConfigurationError("regime_min_persistence must be >= 1")
         return self
 
 
@@ -423,7 +420,9 @@ def map_evolution_pressure_to_scheduler_policy(
     finite_non_negative = [
         float(value)
         for value in violations.values()
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        if isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
     ]
     finite_non_negative = [max(0.0, value) for value in finite_non_negative]
     pressure_score = float(sum(finite_non_negative))

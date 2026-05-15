@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
+from liq.core import RegimeId
+from liq.evolution import regime_model
 from liq.evolution.program import TerminalNode
 from liq.evolution.regime_model import (
     RegimeDetector,
     RegimeExpert,
     RegimeGate,
-    RegimeId,
     RegimeModel,
     RegimeRisk,
     RegimeWeights,
@@ -18,7 +21,9 @@ from liq.gp.types import BoolSeries, Series
 
 
 def _detector() -> RegimeDetector:
-    return RegimeDetector(RegimeId.trend, TerminalNode(name="detector", output_type=BoolSeries))
+    return RegimeDetector(
+        RegimeId.trend, TerminalNode(name="detector", output_type=BoolSeries)
+    )
 
 
 def _gate() -> RegimeGate:
@@ -49,7 +54,10 @@ class TestRegimeIdContracts:
 
     def test_invalid_regime_value_rejected(self) -> None:
         with pytest.raises(ValueError):
-            RegimeId("invalid")  # type: ignore[arg-type]
+            RegimeId("invalid")
+
+    def test_regime_model_module_does_not_reexport_regime_id(self) -> None:
+        assert not hasattr(regime_model, "RegimeId")
 
 
 class TestRegimeWeightsContracts:
@@ -61,11 +69,11 @@ class TestRegimeWeightsContracts:
 
     def test_non_numeric_entries_rejected(self) -> None:
         with pytest.raises(TypeError):
-            RegimeWeights(("a",))  # type: ignore[arg-type]
+            RegimeWeights(cast(tuple[float, ...], ("a",)))
 
     def test_bool_weights_rejected(self) -> None:
         with pytest.raises(TypeError):
-            RegimeWeights((True,))  # type: ignore[arg-type]
+            RegimeWeights((True,))
 
     def test_negative_weights_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
@@ -128,7 +136,10 @@ class TestRegimeModelContracts:
             experts=(_expert("e1"),),
         )
         with pytest.raises(AttributeError):
-            model.detector = RegimeDetector(
-                RegimeId.trend,
-                TerminalNode(name="detector2", output_type=BoolSeries),
-            )  # type: ignore[misc]
+            model.__setattr__(
+                "detector",
+                RegimeDetector(
+                    RegimeId.trend,
+                    TerminalNode(name="detector2", output_type=BoolSeries),
+                ),
+            )

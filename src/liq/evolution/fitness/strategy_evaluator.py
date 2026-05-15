@@ -60,7 +60,6 @@ from liq.sim.fx_eval import (
     turnover_from_positions,
 )
 
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_OBJECTIVES = (
@@ -466,10 +465,7 @@ class StrategyEvaluator:
         )
 
     def _program_hash(self, program: Program, *, index: int | None = None) -> str:
-        if index is not None:
-            fallback = f"{index}"
-        else:
-            fallback = "program"
+        fallback = f"{index}" if index is not None else "program"
         try:
             return compute_program_hash(program)
         except Exception:

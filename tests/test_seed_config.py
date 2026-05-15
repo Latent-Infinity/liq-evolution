@@ -221,7 +221,9 @@ def test_load_seed_manifest_rejects_missing_path(tmp_path: Path) -> None:
         seed_config.load_seed_manifest(missing)
 
 
-def test_load_seed_manifest_rejects_non_file_non_dir(monkeypatch, tmp_path: Path) -> None:
+def test_load_seed_manifest_rejects_non_file_non_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
     marker = tmp_path / "opaque.node"
     _write(marker, "seed")
 

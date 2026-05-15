@@ -7,6 +7,7 @@ It handles primitive registration, multi-stage fitness evaluation, and
 parallel program evaluation.
 """
 
+from liq.core import RegimeId
 from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
 from liq.evolution.adapters.runner_strategy import GPStrategyAdapter
 from liq.evolution.adapters.signal_output import GPSignalOutput
@@ -96,7 +97,6 @@ from liq.evolution.regime_model import (
     RegimeDetector,
     RegimeExpert,
     RegimeGate,
-    RegimeId,
     RegimeModel,
     RegimeRisk,
     RegimeWeights,

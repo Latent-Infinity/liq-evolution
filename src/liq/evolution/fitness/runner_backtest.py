@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-import time
+from contextlib import suppress
 from typing import Any, Literal
 
 import numpy as np
@@ -244,7 +245,9 @@ class BacktestFitnessEvaluator:
         if n <= 1:
             return 0.0
         transitions = sum(
-            1 for left, right in zip(trace[:-1], trace[1:], strict=False) if left != right
+            1
+            for left, right in zip(trace[:-1], trace[1:], strict=False)
+            if left != right
         )
         return 1.0 - transitions / max(1.0, float(n - 1))
 
@@ -254,7 +257,9 @@ class BacktestFitnessEvaluator:
         if n <= 1:
             return 0.0
         transitions = sum(
-            1 for left, right in zip(trace[:-1], trace[1:], strict=False) if left != right
+            1
+            for left, right in zip(trace[:-1], trace[1:], strict=False)
+            if left != right
         )
         return transitions / max(1.0, float(n - 1))
 
@@ -281,9 +286,7 @@ class BacktestFitnessEvaluator:
     ) -> dict[str, Any]:
         trace = self._extract_regime_trace(metrics.get("regime_trace"))
 
-        explicit_stability = self._metric_value_optional(
-            metrics, "regime_stability"
-        )
+        explicit_stability = self._metric_value_optional(metrics, "regime_stability")
         regime_penalty = self._metric_value_optional(
             metrics, "regime_penalty", "regime_robustness_penalty"
         )
@@ -334,7 +337,9 @@ class BacktestFitnessEvaluator:
     ) -> dict[str, Any]:
         merged = dict(fold)
         base_metrics_raw = fold.get("metrics", {})
-        base_metrics = dict(base_metrics_raw) if isinstance(base_metrics_raw, Mapping) else {}
+        base_metrics = (
+            dict(base_metrics_raw) if isinstance(base_metrics_raw, Mapping) else {}
+        )
 
         def _merge_component(component: Mapping[str, Any] | None) -> None:
             if component is None:
@@ -359,7 +364,9 @@ class BacktestFitnessEvaluator:
         program: Program,
         regime_fields: Mapping[str, Any],
     ) -> tuple[float, ...]:
-        metrics = fold.get("metrics", {}) if isinstance(fold.get("metrics"), Mapping) else {}
+        metrics = (
+            fold.get("metrics", {}) if isinstance(fold.get("metrics"), Mapping) else {}
+        )
 
         ret = self._metric_value(
             metrics,
@@ -382,10 +389,11 @@ class BacktestFitnessEvaluator:
         )
         return_objective = ret - friction - execution_penalty
 
-        drawdown_risk = self._metric_value(metrics, "max_drawdown", "drawdown", "max_dd")
+        drawdown_risk = self._metric_value(
+            metrics, "max_drawdown", "drawdown", "max_dd"
+        )
         turnover = (
-            self._metric_value(metrics, "turnover", "avg_turnover")
-            + execution_penalty
+            self._metric_value(metrics, "turnover", "avg_turnover") + execution_penalty
         )
         complexity_penalty = self._metric_value(
             metrics,
@@ -445,7 +453,9 @@ class BacktestFitnessEvaluator:
 
             churn_ratio = max(churn_ratio, self._trace_churn_ratio(trace))
 
-        base_stability = float(np.mean([record["regime_stability"] for record in regime_records]))
+        base_stability = float(
+            np.mean([record["regime_stability"] for record in regime_records])
+        )
 
         if tiny_ratio > 0.0:
             reason_codes.append("small_regime_samples")
@@ -479,7 +489,9 @@ class BacktestFitnessEvaluator:
             reason_codes.append("regime_coverage_missing")
             return 0.0
 
-        global_unique = sorted({str(item) for trace in non_empty for item in set(trace)})
+        global_unique = sorted(
+            {str(item) for trace in non_empty for item in set(trace)}
+        )
         if len(global_unique) <= 1:
             reason_codes.append("single_regime_overfit")
             return 0.0
@@ -571,7 +583,7 @@ class BacktestFitnessEvaluator:
 
         metric_values: list[float] = []
         fold_vectors: list[tuple[float, ...]] = []
-        regime_records: list[dict[str, Any]] = []
+        regime_records: list[Mapping[str, Any]] = []
         return_samples: list[float] = []
         drawdown_samples: list[float] = []
         reason_codes: list[str] = []
@@ -585,10 +597,8 @@ class BacktestFitnessEvaluator:
             )
             value = metrics.get(self._metric)
             if value is not None:
-                try:
+                with suppress(TypeError, ValueError):
                     metric_values.append(float(value))
-                except (TypeError, ValueError):
-                    pass
 
             return_raw = self._metric_value_optional(
                 metrics,

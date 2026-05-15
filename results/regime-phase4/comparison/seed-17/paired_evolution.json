@@ -1,0 +1,82 @@
+{
+  "best_fitness_delta_trained_minus_evolved": -0.07006584944909192,
+  "evolved": {
+    "best_fitness": -0.010036663048200917,
+    "best_program_size": 13,
+    "detector_source": "evolved",
+    "final_mean_fitness": -0.12929642004263694,
+    "fitness_curve": [
+      {
+        "best_fitness": -0.016207372718539864,
+        "best_program_size": 1,
+        "generation": 0,
+        "mean_fitness": -0.3038850793108045,
+        "mean_program_size": 9.4
+      },
+      {
+        "best_fitness": -0.010036663048200917,
+        "best_program_size": 13,
+        "generation": 1,
+        "mean_fitness": -0.12929642004263694,
+        "mean_program_size": 6.2
+      }
+    ],
+    "seed": 17,
+    "time_to_final_best_generation": 1,
+    "trained_terminal_names": [
+      "svm_regime_is_trend",
+      "svm_regime_is_range",
+      "svm_regime_is_neutral",
+      "svm_regime_is_fallback",
+      "svm_regime_is_no_trade",
+      "svm_regime_is_empty"
+    ]
+  },
+  "final_mean_fitness_delta_trained_minus_evolved": -0.48561609730804145,
+  "generations": 2,
+  "handoff_classifier_sha256": "bbfcd6e7ce08db427cfeac00a71916e81f0cbc6cbc4bf971b21133230227bcc1",
+  "handoff_parity_match_rate": 1.0,
+  "population_size": 10,
+  "seed": 17,
+  "trained": {
+    "best_fitness": -0.08010251249729283,
+    "best_program_size": 8,
+    "detector_source": "trained",
+    "final_mean_fitness": -0.6149125173506784,
+    "fitness_curve": [
+      {
+        "best_fitness": -0.07131041840426955,
+        "best_program_size": 8,
+        "generation": 0,
+        "mean_fitness": -0.36823165778566774,
+        "mean_program_size": 9.2
+      },
+      {
+        "best_fitness": -0.08010251249729283,
+        "best_program_size": 8,
+        "generation": 1,
+        "mean_fitness": -0.6149125173506784,
+        "mean_program_size": 9.9
+      }
+    ],
+    "seed": 17,
+    "time_to_final_best_generation": 0,
+    "trained_terminal_names": [
+      "svm_regime_is_trend",
+      "svm_regime_is_range",
+      "svm_regime_is_neutral",
+      "svm_regime_is_fallback",
+      "svm_regime_is_no_trade",
+      "svm_regime_is_empty"
+    ]
+  },
+  "trained_terminal_names": [
+    "svm_regime_is_trend",
+    "svm_regime_is_range",
+    "svm_regime_is_neutral",
+    "svm_regime_is_fallback",
+    "svm_regime_is_no_trade",
+    "svm_regime_is_empty"
+  ],
+  "trusted_classifier_path": "../liq-experiments/results/regime-phase1/handoff/seed-17/svm-regime-handoff.joblib"
+}

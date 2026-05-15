@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from liq.evolution.fitness.behavior_descriptors import (
+    _DESCRIPTOR_SPECS,
     BEHAVIOR_DESCRIPTOR_BENCHMARK_CORRELATION,
     BEHAVIOR_DESCRIPTOR_DRAWDOWN_PROFILE,
     BEHAVIOR_DESCRIPTOR_HOLDING_PERIOD_PROXY,
@@ -14,11 +15,10 @@ from liq.evolution.fitness.behavior_descriptors import (
     BEHAVIOR_DESCRIPTOR_TAIL_RISK,
     BEHAVIOR_DESCRIPTOR_TRADE_FREQUENCY,
     BEHAVIOR_DESCRIPTOR_TURNOVER,
-    _DESCRIPTOR_SPECS,
-    _DescriptorSpec,
     _benchmark_correlation,
     _clamp,
     _correlation,
+    _DescriptorSpec,
     _drawdown_profile,
     _holding_period_proxy,
     _max_drawdown,

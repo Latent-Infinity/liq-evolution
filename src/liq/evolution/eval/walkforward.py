@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import random
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -38,7 +38,9 @@ def build_walk_forward_splits(
     if step_size <= 0:
         raise ValueError("step_size must be positive")
     if embargo_bars < 0 or purge_bars < 0 or label_lookahead_bars < 0:
-        raise ValueError("embargo_bars, purge_bars, and label_lookahead_bars must be non-negative")
+        raise ValueError(
+            "embargo_bars, purge_bars, and label_lookahead_bars must be non-negative"
+        )
 
     if not anchored:
         splits = generate_walk_forward_splits(
@@ -51,7 +53,9 @@ def build_walk_forward_splits(
             label_lookahead_bars=label_lookahead_bars,
         )
         if shuffle_folds:
-            rng = random.Random(deterministic_seed if deterministic_seed is not None else 0)
+            rng = random.Random(
+                deterministic_seed if deterministic_seed is not None else 0
+            )
             splits = sorted(splits, key=lambda split: split.slice_id)
             rng.shuffle(splits)
         return splits
@@ -120,6 +124,23 @@ def _to_list_or_raise(value: Any) -> Sequence[Any]:
     raise TypeError("regime_series must be a sequence")
 
 
+def _segment_values(
+    values: Sequence[Any],
+    selector: slice | tuple[datetime, datetime],
+    timestamps: Sequence[datetime] | None,
+) -> Sequence[Any]:
+    if isinstance(selector, slice):
+        return values[selector]
+    if timestamps is None:
+        raise TypeError("timestamp range selectors require timestamps")
+    start, stop = selector
+    return [
+        value
+        for value, timestamp in zip(values, timestamps, strict=True)
+        if start <= timestamp < stop
+    ]
+
+
 def summarize_regime_participation(
     splits: Sequence[WalkForwardSplit],
     regime_series: Sequence[Any] | Mapping[int, Any],
@@ -149,7 +170,7 @@ def summarize_regime_participation(
 
         counter: Counter[str] = Counter()
         for slice_ in (bars.train, bars.validate, bars.test):
-            segment = values[slice_]
+            segment = _segment_values(values, slice_, timestamps)
             counter.update(str(value) for value in segment)
         summaries.append(dict(sorted(counter.items(), key=lambda item: item[0])))
     return summaries

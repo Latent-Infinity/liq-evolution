@@ -214,7 +214,9 @@ class TestStrategyEvaluatorLoggingContracts:
             behavior_descriptor_names=(BEHAVIOR_DESCRIPTOR_TURNOVER,),
         )
 
-        with caplog.at_level(logging.INFO, logger="liq.evolution.fitness.strategy_evaluator"):
+        with caplog.at_level(
+            logging.INFO, logger="liq.evolution.fitness.strategy_evaluator"
+        ):
             evaluator.evaluate(
                 [_make_program()],
                 context={"run_id": "run-strategy", "labels": np.zeros(100)},
@@ -226,7 +228,8 @@ class TestStrategyEvaluatorLoggingContracts:
             for message in messages
         )
         assert any(
-            "candidate_hash=" in message and "strategy_evaluator candidate_complete" in message
+            "candidate_hash=" in message
+            and "strategy_evaluator candidate_complete" in message
             for message in messages
         )
         assert any(

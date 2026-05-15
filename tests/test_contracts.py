@@ -7,26 +7,26 @@ from typing import Any
 import numpy as np
 import pytest
 
+from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
+from liq.evolution.errors import (
+    EvaluationContractError,
+    ProtocolVersionError,
+)
 from liq.evolution.protocols import (
+    EVOLUTION_PROTOCOL_VERSION,
+    GP_PROTOCOL_VERSION,
+    CandidateArtifact,
+    CandidateEvaluator,
+    EvolutionArtifactStore,
     FitnessEvaluator,
     FitnessStageEvaluator,
     GPStrategy,
     IndicatorBackend,
-    CandidateArtifact,
-    CandidateEvaluator,
-    EvolutionArtifactStore,
-    GP_PROTOCOL_VERSION,
+    PrimitiveRegistry,
     StrategyArtifact,
-    EVOLUTION_PROTOCOL_VERSION,
+    mask_sensitive_context,
     require_protocol_version,
     translate_protocol_exception,
-    mask_sensitive_context,
-    PrimitiveRegistry,
-)
-from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
-from liq.evolution.errors import (
-    ProtocolVersionError,
-    EvaluationContractError,
 )
 
 
@@ -186,12 +186,16 @@ class TestCandidateProtocolContracts:
         class Evaluator:
             protocol_version = "1.0"
 
-            def evaluate_candidate(self, candidate: CandidateArtifact, context: dict[str, object]) -> bool:
+            def evaluate_candidate(
+                self, candidate: CandidateArtifact, context: dict[str, object]
+            ) -> bool:
                 return True
 
         evaluator = Evaluator()
         assert isinstance(evaluator, CandidateEvaluator)
-        require_protocol_version("candidate", evaluator.protocol_version, GP_PROTOCOL_VERSION)
+        require_protocol_version(
+            "candidate", evaluator.protocol_version, GP_PROTOCOL_VERSION
+        )
 
     def test_evolution_artifact_store_protocol(self) -> None:
         class Store:

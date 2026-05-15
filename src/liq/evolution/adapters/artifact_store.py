@@ -75,10 +75,10 @@ class LiqStoreEvolutionArtifactStore:
             return
 
         key = self._artifact_key(artifact_id)
-        if hasattr(artifact, "model_dump") and callable(getattr(artifact, "model_dump")):
+        if hasattr(artifact, "model_dump") and callable(artifact.model_dump):
             payload = artifact.model_dump()  # type: ignore[attr-defined]
         elif hasattr(artifact, "payload"):
-            payload = {"payload": getattr(artifact, "payload")}
+            payload = {"payload": artifact.payload}
         else:
             payload = {"artifact": str(artifact)}
         encoded = serialize_sensitive_payload(
@@ -94,7 +94,10 @@ class LiqStoreEvolutionArtifactStore:
 
         try:
             parsed = json.loads(raw.decode("utf-8"))
-            if isinstance(parsed, dict) and parsed.get("__artifact_type__") == "generic":
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("__artifact_type__") == "generic"
+            ):
                 return parsed.get("payload")
         except Exception:
             pass

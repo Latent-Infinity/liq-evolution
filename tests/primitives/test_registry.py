@@ -106,7 +106,9 @@ class TestBuildTradingRegistryIndicators:
     def test_default_build_registers_indicators(self, liq_features_backend) -> None:
         reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
         indicator_names = [
-            name for name, primitive in reg._primitives.items() if primitive.category == "indicator"
+            name
+            for name, primitive in reg._primitives.items()
+            if primitive.category == "indicator"
         ]
         assert len(indicator_names) > 100
         assert reg.get("rsi") is not None
@@ -117,7 +119,9 @@ class TestBuildTradingRegistryIndicators:
     def test_default_build_registers_indicators_without_explicit_backend(self) -> None:
         reg = build_trading_registry(PrimitiveConfig())
         indicator_names = [
-            name for name, primitive in reg._primitives.items() if primitive.category == "indicator"
+            name
+            for name, primitive in reg._primitives.items()
+            if primitive.category == "indicator"
         ]
         assert len(indicator_names) > 100
         assert reg.get("rsi") is not None
@@ -135,7 +139,9 @@ class TestBuildTradingRegistryIndicators:
         with pytest.raises(PrimitiveError):
             reg.get("ta_macd_signal")
 
-    def test_default_build_preserves_other_categories(self, liq_features_backend) -> None:
+    def test_default_build_preserves_other_categories(
+        self, liq_features_backend
+    ) -> None:
         reg = build_trading_registry(PrimitiveConfig(), backend=liq_features_backend)
         # Standard categories still present when not explicitly disabled.
         assert len(reg.list_primitives(category="numeric")) == 12

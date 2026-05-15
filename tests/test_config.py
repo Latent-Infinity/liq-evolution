@@ -13,9 +13,9 @@ from liq.evolution.config import (
     FitnessConfig,
     FitnessStageConfig,
     GPConfig,
-    RegimeGateConfig,
     ParallelConfig,
     PrimitiveConfig,
+    RegimeGateConfig,
     SerializationConfig,
     WarmStartConfig,
 )
@@ -213,11 +213,15 @@ class TestEvolutionRunConfig:
             EvolutionRunConfig(stage_a_candidate_budget=0)
 
     def test_stage_a_min_candidates_rejects_nonpositive(self) -> None:
-        with pytest.raises(ConfigurationError, match="stage_a_min_candidates must be >= 1"):
+        with pytest.raises(
+            ConfigurationError, match="stage_a_min_candidates must be >= 1"
+        ):
             EvolutionRunConfig(stage_a_min_candidates=0)
 
     def test_stage_b_min_candidates_rejects_nonpositive(self) -> None:
-        with pytest.raises(ConfigurationError, match="stage_b_min_candidates must be >= 1"):
+        with pytest.raises(
+            ConfigurationError, match="stage_b_min_candidates must be >= 1"
+        ):
             EvolutionRunConfig(stage_b_min_candidates=0)
 
     def test_protocol_version_rejects_unknown_schema(self) -> None:
@@ -356,7 +360,9 @@ class TestGPConfig:
         assert cfg.seed_injection.count == 8
 
     def test_invalid_constant_opt_mode_rejected(self) -> None:
-        with pytest.raises((ConfigurationError, ValidationError), match="constant_opt_mode"):
+        with pytest.raises(
+            (ConfigurationError, ValidationError), match="constant_opt_mode"
+        ):
             GPConfig(constant_opt_mode="bad")
 
     def test_constant_opt_max_evals_rejects_nonpositive(self) -> None:
@@ -407,7 +413,9 @@ class TestFitnessConfig:
             FitnessConfig(objectives=("f1",), objective_directions=("noop",))
 
     def test_objective_direction_rejected_in_model_validator(self) -> None:
-        cfg = FitnessConfig.model_construct(objectives=("f1",), objective_directions=("noop",))
+        cfg = FitnessConfig.model_construct(
+            objectives=("f1",), objective_directions=("noop",)
+        )
         with pytest.raises(ConfigurationError, match="objective_directions\\[0\\]"):
             cfg._validate_fitness_config()
 

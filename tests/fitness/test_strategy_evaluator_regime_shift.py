@@ -120,7 +120,9 @@ def test_synthetic_regime_shift_is_reproducible_and_reason_codes_stable() -> Non
     first = evaluator.evaluate(programs, context={"labels": [0.0, 1.0]})
     second = evaluator.evaluate(programs, context={"labels": [0.0, 1.0]})
 
-    assert [result.objectives for result in first] == [result.objectives for result in second]
+    assert [result.objectives for result in first] == [
+        result.objectives for result in second
+    ]
     assert [
         result.metadata[METADATA_KEY_CONSTRAINT_VIOLATIONS] for result in first
     ] == [result.metadata[METADATA_KEY_CONSTRAINT_VIOLATIONS] for result in second]

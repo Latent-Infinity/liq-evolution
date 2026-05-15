@@ -7,7 +7,11 @@ import builtins
 import pytest
 
 from liq.evolution.adapters.artifact_store import LiqStoreEvolutionArtifactStore
-from liq.evolution.artifacts import DependencyFingerprint, EvolutionRunArtifact, RejectionEvent
+from liq.evolution.artifacts import (
+    DependencyFingerprint,
+    EvolutionRunArtifact,
+    RejectionEvent,
+)
 from liq.evolution.errors import AdapterError
 
 

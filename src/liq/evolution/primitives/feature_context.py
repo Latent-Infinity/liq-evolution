@@ -43,7 +43,9 @@ class FeatureContext:
                 str(value.ravel()[:16].tolist()),
             )
         if isinstance(value, dict):
-            return tuple(sorted((str(k), FeatureContext._hashable(v)) for k, v in value.items()))
+            return tuple(
+                sorted((str(k), FeatureContext._hashable(v)) for k, v in value.items())
+            )
         if isinstance(value, list):
             hashed = [FeatureContext._hashable(v) for v in value]
             try:
@@ -70,9 +72,7 @@ class FeatureContext:
             for key, value in kwargs.items()
             if key not in {"out", "ts", "data", "cache"}
         }
-        data_signature = tuple(
-            sorted((k, self._hashable(v)) for k, v in data.items())
-        )
+        data_signature = tuple(sorted((k, self._hashable(v)) for k, v in data.items()))
         key = (
             name,
             tuple(sorted((k, self._hashable(v)) for k, v in params.items())),
@@ -97,7 +97,9 @@ class FeatureContext:
             self._cache.clear()
             return
         if params is not None:
-            params_key = tuple(sorted((k, self._hashable(v)) for k, v in params.items()))
+            params_key = tuple(
+                sorted((k, self._hashable(v)) for k, v in params.items())
+            )
             self._cache = {
                 key: value
                 for key, value in self._cache.items()

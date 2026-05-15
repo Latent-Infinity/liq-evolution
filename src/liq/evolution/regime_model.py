@@ -7,27 +7,12 @@ perform evaluation.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
-import math
 
+from liq.core import RegimeId as _RegimeId
 from liq.evolution.program import Program
-
-
-class RegimeId(StrEnum):
-    """Supported high-level regime labels.
-
-    This list mirrors the structured regime state labels currently used in
-    `liq.evolution.adapters.signal_output`.
-    """
-
-    trend = "trend"
-    range = "range"
-    neutral = "neutral"
-    fallback = "fallback"
-    no_trade = "no_trade"
-    empty = "empty"
 
 
 @dataclass(frozen=True)
@@ -62,7 +47,7 @@ class RegimeWeights:
 class _RegimeBlock:
     """Internal base class for role-specific blocks."""
 
-    label: RegimeId
+    label: _RegimeId
     program: Program
 
 
@@ -118,4 +103,3 @@ class RegimeModel:
                 "RegimeWeights length must match number of experts: "
                 f"{len(self.weights)} != {len(self.experts)}"
             )
-

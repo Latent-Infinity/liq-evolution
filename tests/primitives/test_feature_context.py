@@ -118,8 +118,8 @@ class TestFeatureContextCaching:
 
     def test_different_input_data_do_not_share_cache_entry(self) -> None:
         backend = _make_backend()
-        backend.compute.side_effect = (
-            lambda name, params, data, **kw: np.asarray(data["close"], dtype=float)
+        backend.compute.side_effect = lambda name, params, data, **kw: np.asarray(
+            data["close"], dtype=float
         )
         ctx = FeatureContext(backend)
 
@@ -242,7 +242,9 @@ class TestFeatureContextHashing:
 
     def test_hashable_handles_dict_params_order_independent(self) -> None:
         hashable = FeatureContext._hashable({"b": [1, 2, 3], "a": {"x": 1, "y": 2}})
-        hashable_reordered = FeatureContext._hashable({"a": {"y": 2, "x": 1}, "b": [3, 2, 1]})
+        hashable_reordered = FeatureContext._hashable(
+            {"a": {"y": 2, "x": 1}, "b": [3, 2, 1]}
+        )
 
         assert hashable == hashable_reordered
 

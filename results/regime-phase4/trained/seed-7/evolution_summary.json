@@ -1,0 +1,32 @@
+{
+  "best_fitness": -0.07405243040430078,
+  "best_program_size": 11,
+  "detector_source": "trained",
+  "final_mean_fitness": -0.2635820885882511,
+  "fitness_curve": [
+    {
+      "best_fitness": -0.09263368532802559,
+      "best_program_size": 1,
+      "generation": 0,
+      "mean_fitness": -0.3546402159900907,
+      "mean_program_size": 7.1
+    },
+    {
+      "best_fitness": -0.07405243040430078,
+      "best_program_size": 11,
+      "generation": 1,
+      "mean_fitness": -0.2635820885882511,
+      "mean_program_size": 7.9
+    }
+  ],
+  "seed": 7,
+  "time_to_final_best_generation": 1,
+  "trained_terminal_names": [
+    "svm_regime_is_trend",
+    "svm_regime_is_range",
+    "svm_regime_is_neutral",
+    "svm_regime_is_fallback",
+    "svm_regime_is_no_trade",
+    "svm_regime_is_empty"
+  ]
+}

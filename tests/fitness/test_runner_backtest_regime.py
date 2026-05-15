@@ -295,12 +295,17 @@ class TestStageBRegimeOverfitPenalties:
                 }
             }
         ]
-        evaluator = BacktestFitnessEvaluator(backtest_runner=_runner(folds), objective_mode="vector")
+        evaluator = BacktestFitnessEvaluator(
+            backtest_runner=_runner(folds), objective_mode="vector"
+        )
         [result] = evaluator.evaluate([_program()], {})
 
         assert result.objectives[3] == 0.0
         assert result.objectives[5] == 0.0
-        assert "missing_regime_evidence" in result.metadata["regime_objective_reason_codes"]
+        assert (
+            "missing_regime_evidence"
+            in result.metadata["regime_objective_reason_codes"]
+        )
         # Single fold with explicit or implicit walk-forward data still stable by convention.
         assert result.objectives[4] == 1.0
 
@@ -327,7 +332,9 @@ class TestStageBRegimeOverfitPenalties:
                 }
             }
         ]
-        tiny_eval = BacktestFitnessEvaluator(backtest_runner=_runner(folds_tiny), objective_mode="vector")
+        tiny_eval = BacktestFitnessEvaluator(
+            backtest_runner=_runner(folds_tiny), objective_mode="vector"
+        )
         healthy_eval = BacktestFitnessEvaluator(
             backtest_runner=_runner(folds_healthy), objective_mode="vector"
         )
@@ -343,7 +350,9 @@ class TestStageBRegimeOverfitPenalties:
                     "total_return": 0.03,
                     "max_drawdown": 0.01,
                     "turnover": 0.1,
-                    "regime_trace": [("a" if idx % 2 == 0 else "b") for idx in range(40)],
+                    "regime_trace": [
+                        ("a" if idx % 2 == 0 else "b") for idx in range(40)
+                    ],
                     "complexity_penalty": 0.1,
                 }
             }
@@ -390,11 +399,15 @@ class TestStageBRegimeOverfitPenalties:
                 }
             },
         ]
-        evaluator = BacktestFitnessEvaluator(backtest_runner=_runner(folds), objective_mode="vector")
+        evaluator = BacktestFitnessEvaluator(
+            backtest_runner=_runner(folds), objective_mode="vector"
+        )
         [result] = evaluator.evaluate([_program()], {})
 
         assert result.objectives[5] == 0.0
-        assert "single_regime_overfit" in result.metadata["regime_objective_reason_codes"]
+        assert (
+            "single_regime_overfit" in result.metadata["regime_objective_reason_codes"]
+        )
 
     def test_walk_forward_stability_is_reduced_for_volatile_fold_returns(self) -> None:
         stable_folds = [
@@ -468,7 +481,9 @@ class TestStageBRegimeOverfitPenalties:
             },
         ]
 
-        stable_eval = BacktestFitnessEvaluator(backtest_runner=_runner(stable_folds), objective_mode="vector")
+        stable_eval = BacktestFitnessEvaluator(
+            backtest_runner=_runner(stable_folds), objective_mode="vector"
+        )
         volatile_eval = BacktestFitnessEvaluator(
             backtest_runner=_runner(volatile_folds), objective_mode="vector"
         )
@@ -488,9 +503,7 @@ class TestStageBRegimeOverfitPenalties:
                 }
             }
         ]
-        expected_regime_penalty = abs(
-            cvar_from_pnl([0.01, -0.02, 0.015, -0.01], 0.75)
-        )
+        expected_regime_penalty = abs(cvar_from_pnl([0.01, -0.02, 0.015, -0.01], 0.75))
         folds[0]["metrics"]["regime_penalty"] = expected_regime_penalty
 
         evaluator = BacktestFitnessEvaluator(
@@ -530,7 +543,11 @@ class TestStageBReplayDeterminism:
 
         first = evaluator.evaluate(programs, {})
         second = evaluator.evaluate(programs, {})
-        rank1 = sorted(range(len(programs)), key=lambda i: first[i].objectives[0], reverse=True)
-        rank2 = sorted(range(len(programs)), key=lambda i: second[i].objectives[0], reverse=True)
+        rank1 = sorted(
+            range(len(programs)), key=lambda i: first[i].objectives[0], reverse=True
+        )
+        rank2 = sorted(
+            range(len(programs)), key=lambda i: second[i].objectives[0], reverse=True
+        )
         assert rank1 == rank2
         assert all(r.metadata["runtime_metrics"]["fold_count"] == 1 for r in first)

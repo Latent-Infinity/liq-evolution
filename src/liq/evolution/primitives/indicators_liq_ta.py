@@ -2,33 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import liq_ta
 import numpy as np
 import polars as pl
 
+from liq.evolution.protocols import IndicatorBackend
+from liq.gp.primitives.registry import PrimitiveRegistry
+from liq.gp.types import BoolSeries, GPType, ParamSpec, Series
+
 _LIQ_FEATURES_IMPORT_ERROR: Exception | None = None
+get_indicator: Callable[[str], Any] | None
+get_lq_indicator_metadata: Callable[[str], dict[str, Any]] | None
+list_lq_indicators: Callable[[], list[dict[str, Any]]] | None
 
 try:
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        get_indicator_metadata as get_lq_indicator_metadata,
+    from liq.features.indicators import get_indicator as _get_indicator
+    from liq.features.indicators import (
+        get_indicator_metadata as _get_lq_indicator_metadata,
     )
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        list_indicators as list_lq_indicators,
-    )
-    from liq.features.indicators import (  # type: ignore[import-not-found]
-        get_indicator,
-    )
+    from liq.features.indicators import list_indicators as _list_lq_indicators
 except Exception as exc:  # pragma: no cover - exercised by environment guard tests
     get_lq_indicator_metadata = None
     list_lq_indicators = None
     get_indicator = None
     _LIQ_FEATURES_IMPORT_ERROR = exc
-
-from liq.evolution.protocols import IndicatorBackend
-from liq.gp.primitives.registry import PrimitiveRegistry
-from liq.gp.types import BoolSeries, ParamSpec, Series
+else:
+    get_lq_indicator_metadata = _get_lq_indicator_metadata
+    list_lq_indicators = _list_lq_indicators
+    get_indicator = _get_indicator
 
 
 def _require_liq_features() -> None:
@@ -123,9 +127,9 @@ def _canonical_output_suffixes(indicator: str, output: str) -> set[str]:
 
     if indicator in {"stochastic", "stoch"}:
         if output in {"k", "fastk", "slowk", "stoch_k"}:
-            suffixes.update({"k", "fastk", "slowk", "stoch_k", "slowk"})
+            suffixes.update({"k", "fastk", "slowk", "stoch_k"})
         elif output in {"d", "fastd", "slowd", "stoch_d"}:
-            suffixes.update({"d", "fastd", "slowd", "stoch_d", "slowd"})
+            suffixes.update({"d", "fastd", "slowd", "stoch_d"})
 
     if output == "real":
         suffixes.add("value")
@@ -230,7 +234,7 @@ class LiqFeaturesBackend:
             return len(data["close"])
         for value in data.values():
             if hasattr(value, "__len__"):
-                return len(value)  # type: ignore[arg-type]
+                return len(value)
         raise ValueError("Indicator data input is empty")
 
     @staticmethod
@@ -299,7 +303,9 @@ class LiqFeaturesBackend:
         output_index = kwargs.pop("output_index", 0)
 
         if kwargs:
-            raise TypeError(f"Unsupported kwargs for LiqFeaturesBackend: {sorted(kwargs)}")
+            raise TypeError(
+                f"Unsupported kwargs for LiqFeaturesBackend: {sorted(kwargs)}"
+            )
 
         meta = self._get_indicator_meta(name)
         normalized = _normalize_indicator_name(name)
@@ -456,7 +462,9 @@ def _make_param_specs_from_metadata(
     # If available, use lq indicator defaults for missing entries.
     if indicator_name and not has_explicit_default_params:
         try:
-            for raw_name, value in dict(_get_lq_indicator(indicator_name).default_params).items():
+            for raw_name, value in dict(
+                _get_lq_indicator(indicator_name).default_params
+            ).items():
                 canonical_name = _canonical_param_name(raw_name)
                 if canonical_name and canonical_name not in defaults:
                     coerced = _coerce_default_value(canonical_name, value)
@@ -468,7 +476,7 @@ def _make_param_specs_from_metadata(
     source_params: list[Any] = []
     if not canonical_param_names:
         if isinstance(param_metadata.get("params"), (list, tuple)):
-            source_params = [p for p in param_metadata.get("params", [])]
+            source_params = list(param_metadata.get("params", []))
         else:
             source_params = list(defaults.keys())
 
@@ -481,10 +489,15 @@ def _make_param_specs_from_metadata(
             canonical_param_names.append(canonical)
 
     # Use liq-features parameter grids when available.
+    get_param_grid: Callable[[str], dict[str, list[Any]]] | None
     try:
-        from liq.features.indicators.param_grids import get_param_grid
+        from liq.features.indicators.param_grids import (
+            get_param_grid as _get_param_grid,
+        )
     except Exception:
         get_param_grid = None
+    else:
+        get_param_grid = _get_param_grid
 
     if get_param_grid is not None and indicator_name:
         try:
@@ -642,7 +655,7 @@ def _fallback_fallback_indicator_meta() -> dict[str, dict[str, Any]]:
 
         raw_params = entry.get("parameters", [])
         if isinstance(raw_params, Mapping):
-            params = [str(key) for key in raw_params.keys() if key]
+            params = [str(key) for key in raw_params if key]
         elif isinstance(raw_params, list | tuple):
             for param in raw_params:
                 if isinstance(param, Mapping) and "name" in param:
@@ -863,7 +876,7 @@ def _make_cached_indicator_callable(
         target_len = 0
         for value in data.values():
             if hasattr(value, "__len__"):
-                target_len = len(value)  # type: ignore[arg-type]
+                target_len = len(value)
                 break
 
         kwargs, out = _split_kwargs(kwargs)
@@ -906,17 +919,13 @@ def _backend_candlestick_patterns(backend: IndicatorBackend) -> list[str]:
     """Resolve candlestick discovery source from a backend wrapper."""
     if isinstance(backend, LiqFeaturesBackend):
         return sorted(
-            name
-            for name in backend._indicators
-            if name.startswith(_CDL_PREFIX)
+            name for name in backend._indicators if name.startswith(_CDL_PREFIX)
         )
 
     nested_backend = getattr(backend, "_backend", None)
     if isinstance(nested_backend, LiqFeaturesBackend):
         return sorted(
-            name
-            for name in nested_backend._indicators
-            if name.startswith(_CDL_PREFIX)
+            name for name in nested_backend._indicators if name.startswith(_CDL_PREFIX)
         )
 
     patterns = getattr(backend, "_candlestick_patterns", None)
@@ -1031,9 +1040,9 @@ def register_liq_ta_indicators(
     def _register_aliases(
         primitive_names: list[str],
         callable_: Any,
-        input_types: tuple[type[Series], ...],
+        input_types: tuple[GPType, ...],
         *,
-        output_type: type[Series] | type[BoolSeries],
+        output_type: GPType,
         param_specs: list[ParamSpec] | None,
     ) -> None:
         prototype: Any | None = None
@@ -1115,7 +1124,11 @@ def register_liq_ta_indicators(
                 )
                 output_aliases = _candidate_output_aliases(root_name, out_name)
                 output_aliases_normalized = sorted(
-                    {_build_primitive_name(alias, out_alias) for alias in name_aliases for out_alias in output_aliases}
+                    {
+                        _build_primitive_name(alias, out_alias)
+                        for alias in name_aliases
+                        for out_alias in output_aliases
+                    }
                 )
                 _register_aliases(
                     primitive_names=output_aliases_normalized,

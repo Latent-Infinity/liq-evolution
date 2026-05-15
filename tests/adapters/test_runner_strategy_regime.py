@@ -126,13 +126,17 @@ class TestStage4RegimeOutputContract:
             }
         )
         out = adapter.predict(features)
-        np.testing.assert_array_equal(out.scores.to_numpy(), np.zeros(3, dtype=np.float64))
+        np.testing.assert_array_equal(
+            out.scores.to_numpy(), np.zeros(3, dtype=np.float64)
+        )
         assert out.regime_state is not None
         assert out.regime_state.label == "no_trade"
         assert out.regime_state.reason_code == "threshold_gate"
 
     @patch("liq.evolution.adapters.runner_strategy.gp_evaluate")
-    def test_fallback_output_is_explicit_for_invalid_regime_inputs(self, mock_eval) -> None:
+    def test_fallback_output_is_explicit_for_invalid_regime_inputs(
+        self, mock_eval
+    ) -> None:
         raw = np.array([0.3, -0.2], dtype=np.float64)
         mock_eval.return_value = raw
         adapter = _adapter()
@@ -171,7 +175,9 @@ class TestStage4RegimeHysteresis:
             _adapter(**kwargs)
 
     @patch("liq.evolution.adapters.runner_strategy.gp_evaluate")
-    def test_small_regime_noise_does_not_create_pathological_turnover(self, mock_eval) -> None:
+    def test_small_regime_noise_does_not_create_pathological_turnover(
+        self, mock_eval
+    ) -> None:
         raw = np.array([0.12, -0.04, 0.03, -0.02, 0.11, 0.12, 0.13], dtype=np.float64)
         mock_eval.return_value = raw
         adapter = _adapter(regime_hysteresis_margin=0.1, regime_min_persistence=2)
@@ -187,7 +193,9 @@ class TestStage4RegimeHysteresis:
         assert out.regime_state.turnover < _turnover_ratio(raw)
 
     @patch("liq.evolution.adapters.runner_strategy.gp_evaluate")
-    def test_hard_regime_transition_is_stable_and_switches_after_persistence(self, mock_eval) -> None:
+    def test_hard_regime_transition_is_stable_and_switches_after_persistence(
+        self, mock_eval
+    ) -> None:
         raw = np.array([0.2, 0.22, 0.18, -0.25, -0.27, -0.3], dtype=np.float64)
         mock_eval.return_value = raw
         adapter = _adapter(regime_hysteresis_margin=0.05, regime_min_persistence=2)
@@ -283,6 +291,8 @@ class TestStage4SeedLoadingFallbacks:
 
     def test_load_seed_programs_rejects_non_list_payload(self, tmp_path) -> None:
         path = tmp_path / "bad-seeds.json"
-        path.write_text('{"seed_programs": {"program": "not-a-list"}}', encoding="utf-8")
+        path.write_text(
+            '{"seed_programs": {"program": "not-a-list"}}', encoding="utf-8"
+        )
         with pytest.raises(AdapterError):
             _load_seed_programs(path, PrimitiveRegistry())

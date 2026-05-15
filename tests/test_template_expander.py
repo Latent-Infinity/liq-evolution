@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from liq.evolution.config import PrimitiveConfig
-from liq.evolution.program import TerminalNode
 from liq.evolution.primitives.registry import build_trading_registry
+from liq.evolution.program import TerminalNode
 from liq.evolution.template_expander import (
     CFGLiteTemplateExpander,
     RegimeExpansionTrace,

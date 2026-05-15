@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from pydantic import ValidationError
 
 from liq.evolution.config import EvolutionConfig
 from liq.evolution.errors import ConfigurationError
-
 
 _SAFE_STAGE_A_BUDGET_LIMIT = 25_000
 
@@ -37,7 +37,7 @@ class _CliConfigError(Exception):
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="liquid evolution configuration and diagnostic CLI",
+        description="liquid evolution experiment and artifact CLI",
         exit_on_error=False,
     )
     parser.add_argument(
@@ -128,6 +128,40 @@ def _build_parser() -> argparse.ArgumentParser:
         "--regime-min-persistence",
         type=int,
         help="Override regime.regime_min_persistence",
+    )
+    parser.add_argument(
+        "--detector-source",
+        choices=("evolved", "trained"),
+        default="evolved",
+        help="Regime detector source. 'trained' requires a trusted Phase 1 artifact path.",
+    )
+    parser.add_argument(
+        "--regime-classifier-path",
+        type=Path,
+        help="Trusted SVMRegimeClassifier artifact produced by this workspace.",
+    )
+    parser.add_argument(
+        "--handoff-classifier-path",
+        type=Path,
+        help="Trusted Phase 1 hand-off classifier artifact for save/load parity checks.",
+    )
+    parser.add_argument(
+        "--phase4-evidence-path",
+        type=Path,
+        help="BTC-derived detector_swap.json evidence path for Phase 4 paired evolution.",
+    )
+    parser.add_argument(
+        "--phase4-output-dir",
+        type=Path,
+        help="Output directory for Phase 4 detector-source evolution artifacts.",
+    )
+    parser.add_argument(
+        "--phase4-paired-comparison",
+        action="store_true",
+        help=(
+            "Run both evolved and trained Phase 4 branches and write paired comparison artifacts. "
+            "Without this flag, Phase 4 runs only --detector-source."
+        ),
     )
     parser.add_argument(
         "--allow-expensive",
@@ -283,7 +317,9 @@ def _collect_overrides(namespace: argparse.Namespace) -> dict[str, Any]:
     if fitness_stage_overrides:
         overrides["fitness_stages"] = fitness_stage_overrides
         if namespace.use_backtest is not None:
-            overrides.setdefault("fitness", {})["stage_b_enabled"] = namespace.use_backtest
+            overrides.setdefault("fitness", {})["stage_b_enabled"] = (
+                namespace.use_backtest
+            )
 
     regime_overrides: dict[str, Any] = {}
     for key, value in (
@@ -298,6 +334,25 @@ def _collect_overrides(namespace: argparse.Namespace) -> dict[str, Any]:
         overrides["regime"] = regime_overrides
 
     return overrides
+
+
+def _validate_detector_source(namespace: argparse.Namespace) -> None:
+    if namespace.detector_source != "trained":
+        return
+    if (
+        namespace.regime_classifier_path is None
+        and namespace.handoff_classifier_path is None
+    ):
+        raise _CliConfigError(
+            error_code="evo.cli.trained_detector_missing_artifact",
+            message="--detector-source=trained requires a trusted classifier artifact path.",
+            remediation=(
+                "Pass --regime-classifier-path or --handoff-classifier-path pointing to a trusted "
+                "SVMRegimeClassifier artifact produced by Phase 1 in this workspace. "
+                "Do not load user-uploaded or unverified joblib files."
+            ),
+            context={"detector_source": namespace.detector_source},
+        )
 
 
 def _validate_runtime_safety(
@@ -327,7 +382,7 @@ def _validate_runtime_safety(
             error_code="evo.cli.unsafe_budget",
             message=(
                 "Stage-A candidate budget is above the safe guardrail "
-                f"({_SAFE_STAGE_A_BUDGET_LIMIT-1})."
+                f"({_SAFE_STAGE_A_BUDGET_LIMIT - 1})."
             ),
             remediation=(
                 "Use a lower stage-a-candidate-budget or pass --allow-expensive "
@@ -350,7 +405,9 @@ def _build_config(namespace: argparse.Namespace) -> EvolutionConfig:
             remediation=(
                 "Fix config values and rerun. See the error context for each field."
             ),
-            context={"validation_errors": [{"msg": str(exc), "type": "configuration_error"}]},
+            context={
+                "validation_errors": [{"msg": str(exc), "type": "configuration_error"}]
+            },
         ) from exc
     except ValidationError as exc:
         raise _CliConfigError(
@@ -404,12 +461,78 @@ def main(argv: list[str] | None = None) -> int:
                 context={"parser_exit_code": exc.code},
             ) from exc
 
+        _validate_detector_source(namespace)
         config = _build_config(namespace)
+        phase4_selected_result = None
+        phase4_paired_result = None
+        if (
+            namespace.phase4_evidence_path is not None
+            or namespace.phase4_output_dir is not None
+        ):
+            if (
+                namespace.phase4_evidence_path is None
+                or namespace.phase4_output_dir is None
+            ):
+                raise _CliConfigError(
+                    error_code="evo.cli.phase4_paths_missing",
+                    message="Phase 4 evolution requires both --phase4-evidence-path and --phase4-output-dir.",
+                    remediation="Pass both paths or omit both Phase 4 flags.",
+                    context={
+                        "phase4_evidence_path": str(namespace.phase4_evidence_path)
+                        if namespace.phase4_evidence_path
+                        else None,
+                        "phase4_output_dir": str(namespace.phase4_output_dir)
+                        if namespace.phase4_output_dir
+                        else None,
+                    },
+                )
+            from liq.evolution.phase4_detector_swap import (
+                run_detector_source,
+                run_paired_detector_swap,
+            )
+
+            trusted_classifier_path = (
+                namespace.handoff_classifier_path or namespace.regime_classifier_path
+            )
+            if namespace.phase4_paired_comparison:
+                if trusted_classifier_path is None:
+                    raise _CliConfigError(
+                        error_code="evo.cli.phase4_trusted_artifact_missing",
+                        message="Phase 4 paired comparison requires a trusted classifier artifact path.",
+                        remediation=(
+                            "Pass --handoff-classifier-path or --regime-classifier-path so paired "
+                            "comparison verifies the classifier SHA-256 against Phase 4 evidence."
+                        ),
+                        context={"phase4_paired_comparison": True},
+                    )
+                phase4_paired_result = run_paired_detector_swap(
+                    seed=config.seed,
+                    evidence_path=namespace.phase4_evidence_path,
+                    output_root=namespace.phase4_output_dir,
+                    population_size=config.population_size,
+                    generations=config.generations,
+                    trusted_classifier_path=trusted_classifier_path,
+                )
+            else:
+                selected_summary = run_detector_source(
+                    seed=config.seed,
+                    detector_source=namespace.detector_source,
+                    evidence_path=namespace.phase4_evidence_path,
+                    output_dir=namespace.phase4_output_dir
+                    / namespace.detector_source
+                    / f"seed-{config.seed}",
+                    population_size=config.population_size,
+                    generations=config.generations,
+                    trusted_classifier_path=trusted_classifier_path,
+                )
+                phase4_selected_result = selected_summary.to_dict()
         print(
             json.dumps(
                 {
                     "ok": True,
                     "config": config.model_dump(),
+                    "phase4_detector_source_evolution": phase4_selected_result,
+                    "phase4_paired_evolution": phase4_paired_result,
                 },
                 indent=2,
                 sort_keys=True,
@@ -417,7 +540,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except _CliConfigError as exc:
-        print(json.dumps(_render_failure(exc), indent=2, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps(_render_failure(exc), indent=2, sort_keys=True), file=sys.stderr
+        )
         return 2
     except Exception as exc:
         failure = _render_failure(

@@ -2,36 +2,37 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import numpy as np
 import pytest
 
 liq_ta = pytest.importorskip("liq_ta")
 
 from liq.evolution.primitives.indicators_liq_ta import (  # noqa: E402
-    _build_primitive_name,
+    LiqFeaturesBackend,
+    LiqTAIndicatorBackend,
     _backend_candlestick_patterns,
     _backend_indicators,
-    _canonical_output_suffixes,
-    _canonical_param_name,
+    _build_primitive_name,
     _candidate_name_aliases,
     _candidate_output_aliases,
+    _canonical_output_suffixes,
+    _canonical_param_name,
     _coerce_discrete_default,
     _coerce_output,
     _legacy_output_suffix,
-    LiqTAIndicatorBackend,
-    LiqFeaturesBackend,
-    _make_param_specs_from_metadata,
-    _make_multi_output_callable,
     _make_cached_indicator_callable,
-    _make_single_output_callable,
     _make_candlestick_callable,
+    _make_multi_output_callable,
+    _make_param_specs_from_metadata,
+    _make_single_output_callable,
     _normalize_indicator_name,
     register_liq_ta_indicators,
 )
 from liq.gp.primitives.registry import PrimitiveRegistry  # noqa: E402
 from liq.gp.types import BoolSeries, Series  # noqa: E402
-from types import SimpleNamespace
-from typing import Any
 
 
 @pytest.fixture
@@ -307,7 +308,9 @@ class TestLiqFeaturesBackend:
         by_group = backend.list_indicators(category="trend")
         assert isinstance(by_group, list)
 
-    def test_candlestick_registration_only_uses_available_liq_features_names(self) -> None:
+    def test_candlestick_registration_only_uses_available_liq_features_names(
+        self,
+    ) -> None:
         backend = LiqFeaturesBackend()
         patterns = _backend_candlestick_patterns(backend)
         available = set(backend.list_indicators())
@@ -442,14 +445,12 @@ class TestIndicatorHelperFunctions:
             "fastk",
             "slowk",
             "stoch_k",
-            "slowk",
         }
         assert _canonical_output_suffixes("stochastic", "d") == {
             "d",
             "fastd",
             "slowd",
             "stoch_d",
-            "slowd",
         }
         assert _canonical_output_suffixes("sma", "real") == {"real", "value"}
         assert _canonical_output_suffixes("aroon", "aroon_down") == {
@@ -475,7 +476,10 @@ class TestIndicatorHelperFunctions:
             _backend_indicators(SimpleNamespace()),
             dict,
         )
-        assert _backend_candlestick_patterns(SimpleNamespace(_candlestick_patterns=[])) == []
+        assert (
+            _backend_candlestick_patterns(SimpleNamespace(_candlestick_patterns=[]))
+            == []
+        )
         nested = SimpleNamespace(_backend=SimpleNamespace())
         assert isinstance(_backend_candlestick_patterns(nested), list)
         assert len(_backend_candlestick_patterns(nested)) > 0
@@ -590,7 +594,9 @@ class TestCallableFactories:
             np.array([6.0, 6.0]),
         )
 
-        def _fn_four(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> np.ndarray:
+        def _fn_four(
+            a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray
+        ) -> np.ndarray:
             return a + b + c + d
 
         wrapped_four = _make_single_output_callable(_fn_four, 4, supports_out=False)
@@ -651,7 +657,9 @@ class TestCallableFactories:
     ) -> None:
         class Backend:
             def __init__(self) -> None:
-                self.calls: list[tuple[str, dict[str, Any], dict[str, np.ndarray], Any]] = []
+                self.calls: list[
+                    tuple[str, dict[str, Any], dict[str, np.ndarray], Any]
+                ] = []
 
             def compute(
                 self,

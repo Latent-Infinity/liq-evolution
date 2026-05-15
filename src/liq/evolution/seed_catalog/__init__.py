@@ -20,7 +20,6 @@ from .regimes import SEED_TEMPLATES as _REGIME_SEEDS
 from .trend import SEED_TEMPLATES as _TREND_SEEDS
 from .volatility import SEED_TEMPLATES as _VOLATILITY_SEEDS
 
-
 _DETECTOR_TEMPLATES = {
     "atr_volatility_spike",
     "bollinger_breakout",
@@ -150,6 +149,7 @@ def _coerce_template(template: StrategySeedTemplate) -> StrategySeedTemplate:
         failure_modes=_template_failure_modes(name),
     )
 
+
 _STRATEGY_MODULES = (
     _TREND_SEEDS,
     _MOMENTUM_SEEDS,
@@ -211,9 +211,7 @@ def list_seed_templates_by_role(role: SeedTemplateRole | str) -> list[str]:
             role = SeedTemplateRole(role)
         except ValueError as exc:
             allowed = ", ".join(item.value for item in SeedTemplateRole)
-            raise ValueError(
-                f"template role must be one of: {allowed}"
-            ) from exc
+            raise ValueError(f"template role must be one of: {allowed}") from exc
 
     return [
         name
