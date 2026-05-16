@@ -16,6 +16,7 @@ from liq.evolution.seed_catalog._core import (
 from .candles import SEED_TEMPLATES as _CANDLE_SEEDS
 from .carry_spread import SEED_TEMPLATES as _CARRY_SPREAD_SEEDS
 from .momentum import SEED_TEMPLATES as _MOMENTUM_SEEDS
+from .payloads import built_in_seed_payloads
 from .regimes import SEED_TEMPLATES as _REGIME_SEEDS
 from .trend import SEED_TEMPLATES as _TREND_SEEDS
 from .volatility import SEED_TEMPLATES as _VOLATILITY_SEEDS
@@ -226,6 +227,7 @@ __all__ = [
     "SeedTemplateRole",
     "build_strategy_seed",
     "build_strategy_seeds",
+    "built_in_seed_payloads",
     "get_seed_template",
     "list_known_strategy_seeds",
     "list_seed_templates_by_role",
