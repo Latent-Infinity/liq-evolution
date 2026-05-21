@@ -470,7 +470,10 @@ dependencies = [
     { name = "liq-core" },
     { name = "msgspec" },
     { name = "numpy" },
+    { name = "polars" },
     { name = "pydantic" },
+    { name = "rich" },
+    { name = "typer" },
 ]
 
 [package.metadata]
@@ -479,11 +482,14 @@ requires-dist = [
     { name = "liq-core", editable = "../liq-core" },
     { name = "msgspec", specifier = ">=0.18" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "polars", specifier = ">=0.20" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["dev"]
 
