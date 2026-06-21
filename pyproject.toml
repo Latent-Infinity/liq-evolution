@@ -28,6 +28,7 @@ dependencies = [
     "liq-sim>=0.1.1",
     "liq-features>=0.1.1",
     "liq-signals>=0.1.1",
+    "liq-datasets>=0.1.0",
     "liq-ta>=0.1.1",
     "numpy>=2.0",
     "polars>=0.20",
@@ -72,6 +73,7 @@ liq-features = { path = "../liq-features", editable = true }
 liq-core = { path = "../liq-core", editable = true }
 liq-sim = { path = "../liq-sim", editable = true }
 liq-signals = { path = "../liq-signals", editable = true }
+liq-datasets = { path = "../liq-datasets", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/liq"]
@@ -119,6 +121,7 @@ extra-paths = [
     "../liq-gp/src",
     "../liq-signals/src",
     "../liq-features/src",
+    "../liq-datasets/src",
     "../liq-ta/crates/liq-ta-python/src",
     "../liq-store/src",
 ]
