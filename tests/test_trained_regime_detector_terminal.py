@@ -36,8 +36,13 @@ def test_materialize_creates_bool_columns_and_terminal_descriptors() -> None:
 
 def test_materialize_preserves_first_seen_label_order() -> None:
     features = pl.DataFrame({"x": [1.0, 2.0]})
-    terminal = TrainedRegimeDetectorTerminal(_Classifier(), _Labeler(), terminal_name_prefix="regime")
+    terminal = TrainedRegimeDetectorTerminal(
+        _Classifier(), _Labeler(), terminal_name_prefix="regime"
+    )
 
     result = terminal.materialize(features)
 
-    assert [descriptor.name for descriptor in result.terminals] == ["regime_trend", "regime_range"]
+    assert [descriptor.name for descriptor in result.terminals] == [
+        "regime_trend",
+        "regime_range",
+    ]

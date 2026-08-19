@@ -70,7 +70,7 @@ class TrainedRegimeDetectorTerminal:
         terminals: list[TrainedRegimeTerminal] = []
         for label in ordered_labels:
             terminal_name = f"{self.terminal_name_prefix}_{label}"
-            columns[terminal_name] = (label_series == label)
+            columns[terminal_name] = label_series == label
             terminals.append(TrainedRegimeTerminal(name=terminal_name))
 
         return MaterializedRegimeTerminals(
