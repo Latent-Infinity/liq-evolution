@@ -24,11 +24,16 @@ def make_artifact() -> EvolutionRunArtifact:
         run_id="stage10-replay-demo",
         dependency_fingerprint=fingerprint,
         selected_candidate_ids=("cand-101", "cand-202"),
-        per_split_metrics={"time_window:split_0:train": {"sharpe_ratio": 1.11, "max_drawdown": 0.03}},
+        per_split_metrics={
+            "time_window:split_0:train": {"sharpe_ratio": 1.11, "max_drawdown": 0.03}
+        },
         rejection_events=(
             RejectionEvent(code="degenerate_scores", stage="stage_a", penalty=0.0),
             RejectionEvent(
-                code="regime_features_missing", stage="stage_b", detail="demo fallback", penalty=0.05
+                code="regime_features_missing",
+                stage="stage_b",
+                detail="demo fallback",
+                penalty=0.05,
             ),
         ),
         metadata={"api_key": "demo-key", "note": {"access_token": "demo-token"}},
@@ -50,7 +55,9 @@ def run_demo() -> None:
         print(f"loaded run_id: {loaded.run_id}")
         print(f"schema_version: {loaded.schema_version}")
         print(f"artifact selected candidates: {loaded.selected_candidate_ids}")
-        print(f"replay rejection events: {[event.code for event in loaded.rejection_events]}")
+        print(
+            f"replay rejection events: {[event.code for event in loaded.rejection_events]}"
+        )
 
         payload_path = root / key
         raw_payload = payload_path.read_text(encoding="utf-8")

@@ -30,14 +30,22 @@ def build_regime_program(registry: PrimitiveRegistry) -> FunctionNode:
 
 
 def make_price_path() -> tuple[np.ndarray, np.ndarray]:
-    open_ = np.array([101.0, 101.0, 102.0, 101.0, 100.0, 102.0, 103.0, 102.0], dtype=float)
-    close = np.array([102.0, 100.0, 104.0, 99.0, 99.5, 105.0, 101.0, 103.0], dtype=float)
+    open_ = np.array(
+        [101.0, 101.0, 102.0, 101.0, 100.0, 102.0, 103.0, 102.0], dtype=float
+    )
+    close = np.array(
+        [102.0, 100.0, 104.0, 99.0, 99.5, 105.0, 101.0, 103.0], dtype=float
+    )
     return open_, close
 
 
 def make_transition_price_path() -> tuple[np.ndarray, np.ndarray]:
-    open_ = np.array([100.0, 101.0, 102.0, 102.5, 103.0, 103.2, 102.8, 103.0, 104.0], dtype=float)
-    close = np.array([101.0, 101.5, 101.0, 101.2, 102.0, 101.2, 100.8, 100.4, 101.8], dtype=float)
+    open_ = np.array(
+        [100.0, 101.0, 102.0, 102.5, 103.0, 103.2, 102.8, 103.0, 104.0], dtype=float
+    )
+    close = np.array(
+        [101.0, 101.5, 101.0, 101.2, 102.0, 101.2, 100.8, 100.4, 101.8], dtype=float
+    )
     return open_, close
 
 

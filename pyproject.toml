@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "liq-evolution"
-version = "0.2.1"
+version = "0.3.0"
 description = "Trading strategy evolution layer for the LIQ Stack"
 readme = "README.md"
 license = "MIT"
@@ -64,6 +64,10 @@ dev = [
     "ruff>=0.14",
     "pyyaml>=6.0",
     "ty>=0.0.1",
+    # Development only, never imported: it runs the forbidden-package contract
+    # below. Floor and declaration style follow `liq-alert`, which is where this
+    # contract's pattern comes from.
+    "import-linter>=2.0",
 ]
 
 [tool.uv.sources]
@@ -132,10 +136,22 @@ extra-paths = [
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --cov=liq.evolution --cov-report=term-missing --cov-fail-under=95"
+# `tests/` collects everything, including the two trees below. They are named
+# separately because they are different kinds of thing and are addressable as
+# such (`uv run pytest tests/facts -q`):
+#   tests/facts/   — fact evidence. Cited by the evidence index, watched by the
+#                    fact-surface gate, changed only under a Fact Change or an
+#                    Evidence Maintenance task.
+#   tests/support/ — oracles, harnesses, comparators and the port contract
+#                    bases under tests/support/contract/. Never evidence in
+#                    their own right; declared inside the surfaces that lean on
+#                    them.
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "facts: fact evidence (tests/facts/)",
+    "support: oracles, harnesses and port contracts (tests/support/)",
 ]
 
 [tool.coverage.run]
@@ -152,4 +168,59 @@ exclude_lines = [
     "raise NotImplementedError",
     "@overload",
     "\\.\\.\\.",
+]
+
+# Enforced by `uv run lint-imports --config pyproject.toml`, wired into
+# `liq-experiments/bin/verify-ecology`.
+#
+# READ THIS BEFORE ADDING A `liq.*` ENTRY BELOW: you cannot. `liq` is a
+# namespace package, and import-linter rejects any subpackage of one as a
+# forbidden module — so `liq.live`, `liq.trade`, `liq.sim`, `liq.gp`,
+# `liq.risk`, `liq.data` and the rest are unnameable here, and an entry naming
+# one does not silently match nothing, it fails the run with a configuration
+# error. `liq-alert` hit this first and records it in its own `pyproject.toml`.
+# The first-party half of the boundary is closed instead by
+# `tests/support/boundary_scan.py`, which parses the AST of the ecology package
+# and is asserted by `tests/facts/test_boundaries.py`. That test also walks the
+# installed dependency graph, which no static import contract can see. This
+# contract enforces the part that is expressible; that test enforces the rest.
+[tool.importlinter]
+root_package = "liq.evolution"
+# Required because the forbidden list names third-party packages; without it the
+# contract silently covers only first-party imports, which is the half that
+# matters least here.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Nothing reaches a broker, an execution client or an HTTP transport"
+type = "forbidden"
+# The whole library, not just the ecology package: the requirement is that this
+# system cannot submit an order by construction rather than by configuration,
+# and a broker imported two modules away is still linked in. Nothing here
+# imports any of these today, so the wider scope costs nothing and says more.
+source_modules = ["liq.evolution"]
+forbidden_modules = [
+    # HTTP transports. Market data arrives through the guarded data service, in
+    # the consumer repository; nothing in this library talks to a network.
+    "aiohttp",
+    "httpx",
+    "requests",
+    "urllib3",
+    # Brokers and execution clients. Market-data vendors are deliberately
+    # absent — reading a tape is not trading.
+    "alpaca",
+    "alpaca_trade_api",
+    "binance",
+    "cbpro",
+    "ccxt",
+    "coinbase",
+    "ib_async",
+    "ib_insync",
+    "ibapi",
+    "kiteconnect",
+    "oandapyV20",
+    "robin_stocks",
+    "schwab",
+    "tda",
+    "tradestation",
 ]

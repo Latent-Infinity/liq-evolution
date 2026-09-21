@@ -49,9 +49,7 @@ def make_labels(close: np.ndarray, horizon: int = 1) -> np.ndarray:
 
 def mock_backtest_runner(strategy) -> list[dict[str, float]]:
     """Convert strategy output into a deterministic fold metric."""
-    frame = pl.DataFrame(
-        prepare_evaluation_context(generate_ohlcv(120, seed=12_345))
-    )
+    frame = pl.DataFrame(prepare_evaluation_context(generate_ohlcv(120, seed=12_345)))
     try:
         signal = strategy.predict(frame)
     except Exception as exc:
@@ -82,8 +80,13 @@ def mock_backtest_runner(strategy) -> list[dict[str, float]]:
             "metrics": {
                 "sharpe_ratio": sharpe,
                 "total_return": sharpe * 0.08,
-                "max_drawdown": 0.02 + (abs(float(np.min(finite))) / 50.0 if finite.size else 0.0),
-                "turnover": float(np.mean(np.abs(np.diff(np.sign(finite)))) if finite.size > 1 else 0.0),
+                "max_drawdown": 0.02
+                + (abs(float(np.min(finite))) / 50.0 if finite.size else 0.0),
+                "turnover": float(
+                    np.mean(np.abs(np.diff(np.sign(finite))))
+                    if finite.size > 1
+                    else 0.0
+                ),
                 "regime_penalty": 0.0,
                 "complexity_penalty": 0.15,
             },
@@ -133,9 +136,7 @@ def run_two_stage() -> None:
         best = stats.best_fitness[0]
         mean = stats.mean_fitness[0]
         print(
-            f"generation={stats.generation:02d} "
-            f"best_fitness={best:.4f} "
-            f"mean={mean:.4f}"
+            f"generation={stats.generation:02d} best_fitness={best:.4f} mean={mean:.4f}"
         )
 
     result = evolve(
@@ -153,7 +154,9 @@ def run_two_stage() -> None:
     holdout_ohlcv = generate_ohlcv(150, seed=20260304)
     holdout_ctx = prepare_evaluation_context(holdout_ohlcv)
     holdout_ctx["labels"] = make_labels(holdout_ctx["close"])
-    holdout_scores = np.asarray(evaluate(result.best_program, holdout_ctx), dtype=np.float64)
+    holdout_scores = np.asarray(
+        evaluate(result.best_program, holdout_ctx), dtype=np.float64
+    )
     print(f"holdout score sample: {[float(v) for v in holdout_scores[:6]]}")
 
 

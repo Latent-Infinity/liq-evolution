@@ -20,6 +20,7 @@ from liq.gp.evolution.init import validate_seed_programs
 from liq.gp.program.ast import Program
 from liq.gp.program.eval import evaluate as gp_evaluate
 from liq.gp.program.serialize import deserialize, serialize
+from liq.gp.protocols import FitnessEvaluator as GPFitnessEvaluator
 
 if TYPE_CHECKING:
     from liq.gp.config import GPConfig
@@ -61,7 +62,7 @@ class GPStrategyAdapter:
         self,
         registry: PrimitiveRegistry,
         gp_config: GPConfig,
-        evaluator: object | None = None,
+        evaluator: GPFitnessEvaluator | None = None,
         *,
         seed_programs: Sequence[Program] | None = None,
         warm_start: bool = False,
@@ -132,27 +133,27 @@ class GPStrategyAdapter:
         Raises:
             AdapterError: If the adapter is predict-only (no evaluator).
         """
-        if self._evaluator is None:
+        evaluator = self._evaluator
+        if evaluator is None:
             raise AdapterError("Cannot fit a predict-only adapter (evaluator is None)")
 
         context = _dataframe_to_context(features)
         if labels is not None:
             context["labels"] = labels.to_numpy()
 
-        evaluator = self._evaluator
         if self._parallel_config is not None:
-            if evaluator is None:
-                raise AdapterError("Parallel evaluation requires an evaluator")
-
-            evaluator = ParallelEvaluator(
-                evaluator=cast(Evaluator, evaluator),
-                backend=self._parallel_config.backend,
-                max_workers=self._parallel_config.max_workers,
-                max_in_flight=self._parallel_config.max_in_flight,
-                max_tasks_per_worker=self._parallel_config.max_tasks_per_worker,
-                memory_limit_mb=self._parallel_config.memory_limit_mb,
-                memory_warn_threshold_mb=self._parallel_config.memory_warn_threshold_mb,
-                auto_fallback=self._parallel_config.auto_fallback,
+            evaluator = cast(
+                GPFitnessEvaluator,
+                ParallelEvaluator(
+                    evaluator=cast(Evaluator, evaluator),
+                    backend=self._parallel_config.backend,
+                    max_workers=self._parallel_config.max_workers,
+                    max_in_flight=self._parallel_config.max_in_flight,
+                    max_tasks_per_worker=self._parallel_config.max_tasks_per_worker,
+                    memory_limit_mb=self._parallel_config.memory_limit_mb,
+                    memory_warn_threshold_mb=self._parallel_config.memory_warn_threshold_mb,
+                    auto_fallback=self._parallel_config.auto_fallback,
+                ),
             )
 
         result = evolve(
@@ -440,7 +441,7 @@ class GPStrategyAdapter:
         registry: PrimitiveRegistry,
         gp_config: GPConfig,
         evolution_config: EvolutionConfig,
-        evaluator: object | None = None,
+        evaluator: GPFitnessEvaluator | None = None,
         *,
         seed_programs: Sequence[Program] | None = None,
         warm_start: bool = False,
