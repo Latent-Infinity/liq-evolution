@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 __all__ = [
@@ -43,6 +43,16 @@ __all__ = [
 # A timezone-aware timestamp in UTC. Naive timestamps are not valid values.
 type UtcTimestamp = datetime
 
+
+class _UtcTimestampMixin:
+    def _normalize_timestamps(self, *names: str) -> None:
+        for name in names:
+            value = getattr(self, name)
+            if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+                raise ValueError(f"{name} must be timezone-aware")
+            object.__setattr__(self, name, value.astimezone(UTC))
+
+
 # Stable identity of one agent for the life of a run, unique across rebirths.
 type AgentId = str
 
@@ -59,7 +69,7 @@ type SegmentRole = Literal["train", "validate", "test"]
 
 
 @dataclass(frozen=True)
-class Bar:
+class Bar(_UtcTimestampMixin):
     """One completed bar of real market history.
 
     A value of this type exists only for a bar that was complete at
@@ -87,9 +97,12 @@ class Bar:
     close: float
     volume: float
 
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("period_start", "period_end")
+
 
 @dataclass(frozen=True)
-class BarWindow:
+class BarWindow(_UtcTimestampMixin):
     """Everything the population may see at one decision point.
 
     A window is the unit of the forward pass: bars that have completed, the
@@ -121,9 +134,12 @@ class BarWindow:
     features: Mapping[InstrumentId, Mapping[str, float]]
     feature_schema_version: str
 
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+
 
 @dataclass(frozen=True)
-class Intent:
+class Intent(_UtcTimestampMixin):
     """What one agent wants to hold, before any mandate is applied.
 
     An intent is an exposure wish, not an order: it says how much of its own
@@ -144,9 +160,12 @@ class Intent:
     target_exposure: float
     as_of: UtcTimestamp
 
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+
 
 @dataclass(frozen=True)
-class PositionTarget:
+class PositionTarget(_UtcTimestampMixin):
     """An exposure an agent is permitted to hold.
 
     A target carries what the mandate allows, which is not always what the
@@ -169,9 +188,12 @@ class PositionTarget:
     target_exposure: float
     as_of: UtcTimestamp
 
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+
 
 @dataclass(frozen=True)
-class Rejection:
+class Rejection(_UtcTimestampMixin):
     """A refusal to act, with the reason that produced it.
 
     A rejection is an outcome, not an error: it is returned, recorded and
@@ -192,6 +214,9 @@ class Rejection:
     as_of: UtcTimestamp
     reason: str
     detail: str = ""
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
 
 
 @dataclass(frozen=True)
@@ -241,7 +266,7 @@ class SizingOutcome:
 
 
 @dataclass(frozen=True)
-class Fill:
+class Fill(_UtcTimestampMixin):
     """What actually happened when a permitted target was acted on.
 
     ``requested_exposure`` and ``filled_exposure`` are both recorded so that a
@@ -272,9 +297,12 @@ class Fill:
     cost: float
     cost_scenario_id: CostScenarioId
 
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+
 
 @dataclass(frozen=True)
-class AccountState:
+class AccountState(_UtcTimestampMixin):
     """One agent's evaluation account as of an instant.
 
     Each agent is scored on its own account at a normalised notional, so that
@@ -296,6 +324,9 @@ class AccountState:
     equity: float
     exposures: Mapping[InstrumentId, float]
     costs_charged: float
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
 
 
 @dataclass(frozen=True)
@@ -336,7 +367,7 @@ class Descriptor:
 
 
 @dataclass(frozen=True)
-class ArchiveEntry:
+class ArchiveEntry(_UtcTimestampMixin):
     """One agent's place in the diversity record.
 
     An entry is a proposal as much as a record: it is offered to the record,
@@ -357,6 +388,9 @@ class ArchiveEntry:
     descriptor: Descriptor
     objectives: Mapping[str, float]
     recorded_at: UtcTimestamp
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("recorded_at")
 
 
 @dataclass(frozen=True)
