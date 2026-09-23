@@ -58,6 +58,17 @@ def test_only_the_population_adapter_reaches_the_evolution_engine() -> None:
     )
 
 
+def test_only_the_execution_adapter_reaches_the_execution_model() -> None:
+    """Fill mechanics are translated in one module and modelled in none."""
+    violations = boundary_scan.execution_model_imports_outside_the_execution_adapter()
+    assert violations == [], (
+        f"the execution model is reached outside the execution adapter: "
+        f"{violations}. Whether an order fills, at what price and at what "
+        "charge is asked of the simulator through that one module; a second "
+        "importer is an execution assumption spreading into code that decides."
+    )
+
+
 def test_no_archive_is_defined_here() -> None:
     """The archive is composed as-is, so there is nothing here to define."""
     violations = boundary_scan.archive_classes_defined_here()

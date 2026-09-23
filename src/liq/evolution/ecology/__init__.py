@@ -13,8 +13,26 @@ what may be held, acting on it, keeping the population, and drawing from a
 declared null. Domain and use-case code depends on these protocols only.
 Adapters that translate a particular library into them live at the edges, and
 which adapter is used is decided where the run is assembled, never here.
+
+:mod:`liq.evolution.ecology.accounts`, :mod:`liq.evolution.ecology.agent`,
+:mod:`liq.evolution.ecology.config`, :mod:`liq.evolution.ecology.driver`,
+:mod:`liq.evolution.ecology.substrate`, :mod:`liq.evolution.ecology.features`
+and :mod:`liq.evolution.ecology.errors`
+are reached as attributes of this package rather than re-exported name by name. The boundary ``__all__`` names is
+the ports and the values that cross them, and it is asserted to be exactly that;
+what a slice builds behind the boundary stays addressed by its own module, so a
+reader can tell a capability from a contract by how it is written down.
 """
 
+from liq.evolution.ecology import (  # noqa: F401
+    accounts,
+    agent,
+    config,
+    driver,
+    errors,
+    features,
+    substrate,
+)
 from liq.evolution.ecology.ports import (
     AgentPopulation,
     BarSource,
@@ -28,12 +46,14 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Bar,
     BarWindow,
+    CostProvenance,
     CostScenarioId,
     Descriptor,
     Fill,
     Genome,
     InstrumentId,
     Intent,
+    NotFilled,
     NullDeclaration,
     PositionTarget,
     Rejection,
@@ -51,6 +71,7 @@ __all__ = [
     "Bar",
     "BarSource",
     "BarWindow",
+    "CostProvenance",
     "CostScenarioId",
     "Descriptor",
     "ExecutionSimulator",
@@ -58,6 +79,7 @@ __all__ = [
     "Genome",
     "InstrumentId",
     "Intent",
+    "NotFilled",
     "NullDeclaration",
     "PositionTarget",
     "Rejection",

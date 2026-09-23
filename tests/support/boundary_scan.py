@@ -13,7 +13,7 @@ Two mechanisms guard those boundaries and they do not overlap:
   — a forbidden contract over third-party broker, execution-client and HTTP
   packages.
 
-What this module decides, in five scans:
+What this module decides, in six scans:
 
 1. Domain and use-case code imports no first-party package but the ones a
    port-shaped design leaves it — the core value types and its own package.
@@ -29,6 +29,9 @@ What this module decides, in five scans:
    second evolution engine growing inside the ecology beside the one it is
    supposed to compose with.
 5. No class named `*Archive` is defined here — the same guard, for the archive.
+6. Only the execution adapter reaches `liq.sim` — the same guard again, for the
+   execution model: fill and slippage mechanics are translated in one module,
+   and a second importer is an execution assumption spreading inward.
 
 Each scan returns a sorted list of human-readable violations, empty when clean.
 The assertions live in `tests/facts/test_boundaries.py`; this module only looks.
@@ -137,6 +140,13 @@ BROKER_DISTRIBUTIONS = frozenset(
 #: root. A second importer is a second engine starting.
 GP_EVOLUTION_PACKAGE = "liq.gp.evolution"
 GP_EVOLUTION_IMPORTERS = ("adapters/array_genome.py",)
+
+#: The execution model the ecology acts through rather than reimplements, and the
+#: single module allowed to reach it. A second importer is fill mechanics leaking
+#: out of the one place they are translated, which is how an execution assumption
+#: ends up inside the loop that selects agents.
+EXECUTION_MODEL_PACKAGE = "liq.sim"
+EXECUTION_MODEL_IMPORTERS = ("adapters/liq_sim.py",)
 
 #: The archive is composed, never reimplemented, so a class whose name ends
 #: this way inside the ecology is the divergence itself rather than a symptom.
@@ -302,6 +312,19 @@ def gp_evolution_imports_outside_the_population_adapter() -> list[str]:
             continue
         for module in sorted(imported_modules(path)):
             if covers(module, GP_EVOLUTION_PACKAGE):
+                violations.append(f"{relative} imports {module}")
+    return sorted(violations)
+
+
+def execution_model_imports_outside_the_execution_adapter() -> list[str]:
+    """Scan 6 — the anti-divergence guard on the execution model."""
+    violations: list[str] = []
+    for path in ecology_files():
+        relative = _relative(path)
+        if relative in EXECUTION_MODEL_IMPORTERS:
+            continue
+        for module in sorted(imported_modules(path)):
+            if covers(module, EXECUTION_MODEL_PACKAGE):
                 violations.append(f"{relative} imports {module}")
     return sorted(violations)
 

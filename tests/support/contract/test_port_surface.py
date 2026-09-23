@@ -10,6 +10,7 @@ cannot be mutated by one reader under another.
 from __future__ import annotations
 
 import dataclasses
+from datetime import UTC, datetime
 
 import pytest
 
@@ -91,3 +92,17 @@ def test_an_outcome_that_permits_nothing_must_say_why() -> None:
     """Withholding action for no recorded reason cannot be expressed at all."""
     with pytest.raises(ValueError, match="must name at least one rejection"):
         types.SizingOutcome(target=None, rejections=())
+
+
+def test_an_outcome_that_traded_nothing_must_say_why() -> None:
+    """The same discipline at the other boundary: a non-fill is never silent."""
+    with pytest.raises(ValueError, match="must name a stable reason"):
+        types.NotFilled(
+            agent_id="surface-agent",
+            instrument="SURFACE-A",
+            as_of=datetime(2000, 1, 1, tzinfo=UTC),
+            requested_exposure=0.5,
+            held_exposure=0.0,
+            reason="",
+            cost_scenario_id="surface-scenario",
+        )

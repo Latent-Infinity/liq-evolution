@@ -25,12 +25,14 @@ __all__ = [
     "ArchiveEntry",
     "Bar",
     "BarWindow",
+    "CostProvenance",
     "CostScenarioId",
     "Descriptor",
     "Fill",
     "Genome",
     "InstrumentId",
     "Intent",
+    "NotFilled",
     "NullDeclaration",
     "PositionTarget",
     "Rejection",
@@ -267,11 +269,11 @@ class SizingOutcome:
 
 @dataclass(frozen=True)
 class Fill(_UtcTimestampMixin):
-    """What actually happened when a permitted target was acted on.
+    """What actually happened when a permitted target was acted on and traded.
 
-    ``requested_exposure`` and ``filled_exposure`` are both recorded so that a
-    target which could not be reached in full stays visible: scoring reads what
-    was realised, never what was wanted.
+    A fill exists only where something traded. ``requested_exposure`` and
+    ``filled_exposure`` are both recorded so that a target which was not reached
+    stays visible: scoring reads what was realised, never what was wanted.
 
     Attributes:
         agent_id: The agent the fill belongs to.
@@ -280,8 +282,16 @@ class Fill(_UtcTimestampMixin):
         requested_exposure: Exposure the target asked for, as a signed fraction
             of evaluation-account equity.
         filled_exposure: Exposure actually reached, on the same scale. A value
-            differing from ``requested_exposure`` is a partial fill.
-        price: Price the fill was accounted at.
+            differing from ``requested_exposure`` records that the requested
+            exposure was **not reached** — not that it was partially reached.
+            Whether any difference between the two is even expressible depends
+            on the execution model behind the port: under an adapter over a
+            simulator that fills an order in full or not at all, the outcome is
+            all-or-nothing, a partial quantity cannot arise, and a target that
+            was not acted on is reported as :class:`NotFilled` rather than as a
+            fill of nothing. No statistic that presupposes partiality — a fill
+            ratio, a partial-fill rate — is in scope for such a model.
+        price: Price the fill traded at.
         cost: Cost charged for the fill, in the account's units, drawn entirely
             from the named cost scenario.
         cost_scenario_id: The cost scenario every charge in this fill came
@@ -299,6 +309,92 @@ class Fill(_UtcTimestampMixin):
 
     def __post_init__(self) -> None:
         self._normalize_timestamps("as_of")
+
+
+@dataclass(frozen=True)
+class NotFilled(_UtcTimestampMixin):
+    """A permitted target that was acted on and traded nothing, and why.
+
+    This is the other half of what acting on a target can produce, and it exists
+    because the alternative — returning a fill anyway — cannot be written down
+    honestly. A fill that did not trade would carry a price nothing traded at
+    and a charge for a trade nobody made, and it would report the request back
+    as though it were the outcome, which is the single failure the realised-fill
+    rule exists to catch.
+
+    Two shapes are well formed and the difference between them is read from the
+    numbers, not from the type. ``held_exposure`` equal to ``requested_exposure``
+    says the target was already reached and nothing needed trading.
+    ``held_exposure`` differing from it says the target was **not** reached, and
+    ``reason`` says what stopped it.
+
+    Three things are true of every value of this type, and two of them are true
+    because of what the type does not have. There is no ``cost`` field, so
+    nothing can be charged for a trade that did not happen. There is no
+    ``price`` field, so no price can be presented as one something traded at.
+    And ``reason`` is required to be a non-empty stable code, so withholding a
+    trade in silence cannot be expressed at all.
+
+    Attributes:
+        agent_id: The agent the target belonged to.
+        instrument: The instrument the target named.
+        as_of: The instant the outcome is accounted at (UTC).
+        requested_exposure: Exposure the target asked for, as a signed fraction
+            of evaluation-account equity.
+        held_exposure: Exposure still held in that instrument, unchanged by this
+            call, on the same scale.
+        reason: Stable machine-readable code for why nothing traded. Codes are
+            compared and counted across runs, so they carry no free text.
+        detail: Optional human-readable elaboration. Never carries a payload, a
+            credential or anything not safe to log.
+        cost_scenario_id: The cost scenario in force when the target was acted
+            on. Nothing was charged under it; it is carried so that a run's
+            record of what it did is uniform across both outcomes.
+    """
+
+    agent_id: AgentId
+    instrument: InstrumentId
+    as_of: UtcTimestamp
+    requested_exposure: float
+    held_exposure: float
+    reason: str
+    cost_scenario_id: CostScenarioId
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        """Refuse the one shape that would withhold a trade for no stated reason."""
+        self._normalize_timestamps("as_of")
+        if not self.reason:
+            raise ValueError(
+                "an outcome in which nothing traded must name a stable reason: "
+                "a target withheld for no recorded reason is the silent "
+                "adjustment this value exists to make impossible"
+            )
+
+
+@dataclass(frozen=True)
+class CostProvenance:
+    """What the named cost scenario effectively charges, as the adapter applies it.
+
+    A scenario is applied as written, including legs the book being modelled
+    does not trade: silently dropping a parameter would make the charge a
+    number the harness chose rather than one the scenario states, which is an
+    inline cost decision wearing a scenario's name. The difference between what
+    the scenario's headline says and what is actually charged therefore has to
+    be readable rather than reasoned about, which is what this value is for.
+
+    Attributes:
+        cost_scenario_id: The scenario these figures were resolved from.
+        effective_round_trip_bps: What a full round trip is actually charged, in
+            basis points of traded notional, after every leg of the scenario is
+            applied. One call charges one side of this.
+        hedge_leg: Stable code for how the scenario's hedge leg was treated —
+            charged although no hedge is traded, or absent from the scenario.
+    """
+
+    cost_scenario_id: CostScenarioId
+    effective_round_trip_bps: float
+    hedge_leg: str
 
 
 @dataclass(frozen=True)

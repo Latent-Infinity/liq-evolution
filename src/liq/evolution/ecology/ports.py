@@ -30,11 +30,13 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Bar,
     BarWindow,
+    CostProvenance,
     CostScenarioId,
     Descriptor,
     Fill,
     Genome,
     Intent,
+    NotFilled,
     NullDeclaration,
     PositionTarget,
     SizingOutcome,
@@ -115,18 +117,34 @@ class RiskSizer(Protocol):
 
 @runtime_checkable
 class ExecutionSimulator(Protocol):
-    """Act on a permitted target against the bar it was formed on.
+    """Act on a permitted target against the bar that acts on it.
 
     Contract:
 
-    * ``cost_scenario_id`` names the single cost scenario every charge in every
-      fill is drawn from. It is resolved once, outside the ecology, and handed
-      to the adapter by name. No cost is chosen, defaulted or written down
-      here, and a fill carries the name so a result can be reproduced and
-      re-costed.
-    * :meth:`execute` reports what happened, not what was asked for. A target
-      that cannot be reached in full yields a fill whose filled exposure
-      differs from its requested exposure; scoring reads the realised value.
+    * ``cost_scenario_id`` names the single cost scenario every charge is drawn
+      from. It is resolved once, outside the ecology, and handed to the adapter
+      by name. No cost is chosen, defaulted or written down here, and every
+      outcome carries the name so a result can be reproduced and re-costed.
+    * :meth:`cost_provenance` states what that scenario *effectively* charges
+      once every leg of it has been applied. A scenario is applied as written,
+      including a leg the book being modelled does not trade: a parameter
+      dropped in silence would make the charge a number the harness chose, so
+      the effective figure and the treatment of the hedge leg are both readable.
+    * :meth:`execute` reports what happened, not what was asked for. Either
+      something traded — a fill, priced inside the bar and charged under the
+      named scenario — or nothing did, and the outcome says so and names a
+      stable reason for it. A target that is not reached is never reported as a
+      fill of the request; scoring reads the realised value either way. How much
+      of a difference between the requested and the realised exposure is even
+      expressible belongs to the model behind this port: under an adapter over a
+      simulator that fills an order in full or not at all, the outcome is
+      all-or-nothing and a partial quantity cannot arise.
+    * The bar handed to :meth:`execute` is the bar the target is acted on, which
+      is not the bar it was formed on. A target formed at a bar's close and
+      acted on inside that same bar would trade at prices that printed before it
+      was formed; an adapter is therefore entitled to require that a target have
+      aged by the execution model's own minimum delay, and to refuse rather than
+      absorb a target that has not.
     * Account state is handed in and handed back. The port keeps no hidden
       per-agent state between calls, so a run can be resumed from a state that
       was handed out rather than from a provider's private memory.
@@ -134,13 +152,17 @@ class ExecutionSimulator(Protocol):
 
     cost_scenario_id: CostScenarioId
 
+    def cost_provenance(self) -> CostProvenance:
+        """Return what the named scenario effectively charges, as applied here."""
+        ...
+
     def execute(
         self,
         target: PositionTarget,
         bar: Bar,
         account: AccountState,
-    ) -> tuple[Fill, AccountState]:
-        """Act on ``target`` at ``bar`` and return the fill and the new state."""
+    ) -> tuple[Fill | NotFilled, AccountState]:
+        """Act on ``target`` at ``bar`` and return the outcome and the new state."""
         ...
 
 

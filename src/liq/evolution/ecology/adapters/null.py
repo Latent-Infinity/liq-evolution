@@ -16,6 +16,9 @@ exists only so a suite can check the shape of the contract without one.
 For the same reason :class:`NullExecutionSimulator` charges nothing by default.
 A cost belongs to the cost scenario its adapter was configured with, and a
 stand-in must not put a plausible-looking number where a resolved cost belongs.
+The one bound it applies to what it will reach is a declared placeholder of the
+same kind, and exists so that the outcome in which nothing trades is producible
+here rather than only behind a provider.
 """
 
 from __future__ import annotations
@@ -33,12 +36,14 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Bar,
     BarWindow,
+    CostProvenance,
     CostScenarioId,
     Descriptor,
     Fill,
     Genome,
     InstrumentId,
     Intent,
+    NotFilled,
     NullDeclaration,
     PositionTarget,
     Rejection,
@@ -70,6 +75,12 @@ _SEGMENT_ROLES: tuple[SegmentRole, ...] = ("train", "validate", "test")
 # An instant to count decision points from. It anchors the ramp above and says
 # nothing about when anything happened.
 _ORIGIN = datetime(2000, 1, 1, tzinfo=UTC)
+
+# Unit arithmetic, not costs: a target is reached by moving to it once, so one
+# call charges one of a round trip's two sides, and a rate in basis points is a
+# fraction of notional once divided by this.
+_SIDES_PER_ROUND_TRIP = 2
+_BASIS_POINTS_PER_UNIT = 10_000.0
 
 
 @dataclass(frozen=True)
@@ -227,34 +238,83 @@ class NullRiskSizer:
 
 @dataclass(frozen=True)
 class NullExecutionSimulator:
-    """Reach a permitted target in full at the close of the bar it was formed on.
+    """Reach a permitted target in full at the close of the bar that acts on it.
 
     Account state is handed in and handed back; nothing is kept between calls,
     so the same target acted on against the same bar and the same state always
-    produces the same fill.
+    produces the same outcome.
+
+    Both outcomes an execution model can produce are producible here, because a
+    stand-in that could only ever fill would let the half of the contract about
+    *not* filling pass without ever being run. Neither of the two declared
+    bounds below is anyone's limit; like the ramp above they are declared
+    placeholders, chosen so that each outcome can be exercised:
+
+    * more exposure than :attr:`reachable_exposure` is out of reach, which
+      stands in for the position bound a venue applies to an order it will not
+      accept. Nothing trades and the reason is named.
+    * a target already held needs no trade, so nothing trades and that is what
+      is said. A fill here means something traded, always.
 
     Attributes:
         cost_scenario_id: The scenario every charge is drawn from. Resolved
-            outside the ecology and carried into every fill.
-        cost_per_unit_traded: Charge per unit of exposure traded. Zero by
-            default: a stand-in must not put a number where a resolved cost
-            belongs, and a real adapter draws its charges from the named
-            scenario instead.
+            outside the ecology and carried into every outcome.
+        effective_round_trip_bps: What a round trip is charged in basis points
+            of traded notional, one side of it per call. Zero by default: a
+            stand-in must not put a number where a resolved cost belongs, and a
+            real adapter draws its charges from the named scenario instead.
+        reachable_exposure: The largest exposure, in absolute value, this
+            stand-in will reach.
     """
 
+    #: A target larger than this stand-in says it can reach.
+    TARGET_NOT_REACHABLE: ClassVar[str] = "target_exposure_not_reachable"
+    #: A target that is already held, so there is nothing to trade.
+    NOTHING_TO_TRADE: ClassVar[str] = "target_already_held"
+    #: This stand-in resolves no scenario, so it applies no hedge leg either.
+    HEDGE_LEG: ClassVar[str] = "not_in_scenario"
+
     cost_scenario_id: CostScenarioId = "null-no-charge"
-    cost_per_unit_traded: float = 0.0
+    effective_round_trip_bps: float = 0.0
+    reachable_exposure: float = 1.0
+
+    def cost_provenance(self) -> CostProvenance:
+        """Return what the named scenario effectively charges, as applied here."""
+        return CostProvenance(
+            cost_scenario_id=self.cost_scenario_id,
+            effective_round_trip_bps=self.effective_round_trip_bps,
+            hedge_leg=self.HEDGE_LEG,
+        )
 
     def execute(
         self,
         target: PositionTarget,
         bar: Bar,
         account: AccountState,
-    ) -> tuple[Fill, AccountState]:
-        """Act on ``target`` at ``bar`` and return the fill and the new state."""
+    ) -> tuple[Fill | NotFilled, AccountState]:
+        """Act on ``target`` at ``bar`` and return the outcome and the new state."""
         held = account.exposures.get(target.instrument, 0.0)
-        traded = abs(target.target_exposure - held)
-        cost = self.cost_per_unit_traded * traded
+        if abs(target.target_exposure) > self.reachable_exposure:
+            return self._nothing_traded(
+                target,
+                bar,
+                account,
+                held,
+                self.TARGET_NOT_REACHABLE,
+                f"wanted {target.target_exposure} beyond reach {self.reachable_exposure}",
+            )
+        moved = abs(target.target_exposure - held)
+        if moved == 0.0:
+            return self._nothing_traded(
+                target, bar, account, held, self.NOTHING_TO_TRADE, ""
+            )
+        cost = (
+            moved
+            * account.equity
+            * self.effective_round_trip_bps
+            / _SIDES_PER_ROUND_TRIP
+            / _BASIS_POINTS_PER_UNIT
+        )
         fill = Fill(
             agent_id=target.agent_id,
             instrument=target.instrument,
@@ -275,6 +335,35 @@ class NullExecutionSimulator:
             costs_charged=account.costs_charged + cost,
         )
         return fill, new_state
+
+    def _nothing_traded(
+        self,
+        target: PositionTarget,
+        bar: Bar,
+        account: AccountState,
+        held: float,
+        reason: str,
+        detail: str,
+    ) -> tuple[NotFilled, AccountState]:
+        """Report that nothing traded, leaving the account exactly as handed in."""
+        outcome = NotFilled(
+            agent_id=target.agent_id,
+            instrument=target.instrument,
+            as_of=bar.period_end,
+            requested_exposure=target.target_exposure,
+            held_exposure=held,
+            reason=reason,
+            cost_scenario_id=self.cost_scenario_id,
+            detail=detail,
+        )
+        unchanged = AccountState(
+            agent_id=account.agent_id,
+            as_of=outcome.as_of,
+            equity=account.equity,
+            exposures=MappingProxyType(dict(account.exposures)),
+            costs_charged=account.costs_charged,
+        )
+        return outcome, unchanged
 
 
 @dataclass
