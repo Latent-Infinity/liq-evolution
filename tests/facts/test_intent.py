@@ -36,10 +36,14 @@ approved tape would have added. Every number here is a number about that stream.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from types import MappingProxyType
+
 import numpy as np
 
-from liq.evolution.ecology import agent, config, learning
+from liq.evolution.ecology import Genome, agent, config, learning
 from tests.support import level_shift_stream as stream
+from tests.support import state_norm_probe as probe
 
 #: How many decision points are walked before the pair is exhibited. Enough
 #: that the online standardiser has prior-bar statistics to scale by — at the
@@ -201,3 +205,195 @@ def _wishes(windows: tuple[object, ...], *, perturbed: bool) -> tuple[float, ...
                 {stream.QUICK_TO_FORGET: stream.outcome_at(index)},
             )
     return tuple(formed)
+
+
+# ---------------------------------------------------------------------------
+# How the learned state is consulted, and not only whether it is.
+#
+# Every check above sits at an entry gene of zero with one consulted feature.
+# There the wish is ``[w·z > 0]``, which no positive rescaling of ``w`` can
+# move: a rule reading only the *sign* of each learned weight, or scaling each
+# agent's inputs at another agent's forgetting rate, forms the same wishes and
+# passes. The case below is built so that neither can: a non-zero entry gene,
+# two consulted features whose weights the update learns to different sizes,
+# and two agents who forget at different rates.
+
+#: The second feature the case broadcasts, beside the stream's own. A period
+#: coprime with the stream's, so the two are never in step and the update has
+#: to learn two weights rather than one.
+TILT = "tilt"
+TILT_PERIOD = 5
+
+#: How much of the second feature the outcome carries. Not the first feature's
+#: multiple, so the two learned weights are of different sizes.
+TILT_SENSITIVITY = -0.5
+
+#: The entry gene both agents carry. Not zero, so the size of the reading and
+#: not only its sign decides the wish.
+ENTRY_OFF_ZERO = 0.25
+
+#: The two agents, and how fast each forgets. Both inside the declared range.
+TWO_RATES = {"forgets-quickly": 0.95, "forgets-slowly": 0.995}
+
+
+def _tilt_at(index: int) -> float:
+    """The second feature's value at decision point ``index``."""
+    return float((3 * index) % TILT_PERIOD) - float(TILT_PERIOD // 2)
+
+
+def _two_feature_windows() -> tuple[agent.BarWindow, ...]:
+    """The declared stream's decision points, broadcasting two features."""
+    return tuple(
+        replace(
+            window,
+            features=MappingProxyType(
+                {
+                    stream.INSTRUMENT: MappingProxyType(
+                        {
+                            stream.FEATURE: stream.feature_at(index),
+                            TILT: _tilt_at(index),
+                        }
+                    )
+                }
+            ),
+        )
+        for index, window in enumerate(stream.windows())
+    )
+
+
+def _two_feature_birth(agent_id: str, forgetting: float) -> agent.AgentBirth:
+    """One agent consulting both features, at the off-zero entry gene."""
+    genes = {agent.ENTRY_THRESHOLD: ENTRY_OFF_ZERO, agent.FORGETTING_FACTOR: forgetting}
+    for name in (stream.FEATURE, TILT):
+        genes[f"{agent.MASK_PREFIX}{name}"] = 1.0
+        genes[f"{agent.WEIGHT_PREFIX}{name}"] = stream.PRIOR_AT
+    return agent.AgentBirth(
+        agent_id=agent_id,
+        genome=Genome(
+            genes=MappingProxyType(genes), schema_version=stream.GENE_SCHEMA_VERSION
+        ),
+        learned_state=MappingProxyType({}),
+        feature_schema_version=stream.FEATURE_SCHEMA_VERSION,
+        model_version=stream.MODEL_VERSION,
+    )
+
+
+def test_the_wish_is_the_learned_weights_against_the_agents_own_scaling() -> None:
+    """Every wish is the reading the agent's own weights and own scaling imply.
+
+    Two agents a forgetting gene apart, each consulting two features, at an
+    entry gene that is not zero, over the whole declared pass. At every
+    decision point each agent's wish is reconstructed from the weights it
+    carried when it formed it and from an independent reimplementation of the
+    causal standardisation at *its own* forgetting rate, and has to equal the
+    wish it formed; the standardised reading it consumed has to be that
+    reimplementation too, feature by feature.
+
+    The reconstruction is shown able to tell the two wrong rules apart from
+    the right one before it is trusted: read with only the sign of each
+    weight, or with the other agent's scaling, it wishes differently at some
+    decision point for each agent — otherwise matching it would say nothing
+    about how the learned state is consulted. And no reading sits so close to
+    the entry gene that rounding could decide which side it falls.
+    """
+    windows = _two_feature_windows()
+    features = (stream.FEATURE, TILT)
+    state = agent.PopulationState.founded(
+        tuple(
+            _two_feature_birth(agent_id, rate) for agent_id, rate in TWO_RATES.items()
+        ),
+        learning=config.LearningConfig(),
+    )
+    assert state.feature_names == features
+
+    wanted: dict[str, list[float]] = {agent_id: [] for agent_id in TWO_RATES}
+    carried: dict[str, list[tuple[float, ...]]] = {
+        agent_id: [] for agent_id in TWO_RATES
+    }
+    consumed: dict[str, list[tuple[float, ...]]] = {
+        agent_id: [] for agent_id in TWO_RATES
+    }
+    for index, window in enumerate(windows):
+        step = state.step(window, stream.INSTRUMENT)
+        for agent_id, exposure in zip(step.agent_ids, step.wanted, strict=True):
+            wanted[agent_id].append(exposure)
+            weights = state.learned_weights(agent_id)
+            carried[agent_id].append(tuple(weights[name] for name in features))
+            consumed[agent_id].append(state.standardised(agent_id))
+        if index + 1 < len(windows):
+            state.observe(
+                windows[index + 1].as_of,
+                dict.fromkeys(
+                    TWO_RATES,
+                    stream.outcome_at(index) + TILT_SENSITIVITY * _tilt_at(index),
+                ),
+            )
+
+    raw = {
+        name: tuple(window.features[stream.INSTRUMENT][name] for window in windows)
+        for name in features
+    }
+
+    def scaled(rate: float) -> tuple[tuple[float, ...], ...]:
+        columns = [
+            probe.reference_standardised(raw[name], forgetting=rate, peek=False)
+            for name in features
+        ]
+        return tuple(zip(*columns, strict=True))
+
+    def wishes(
+        weights: list[tuple[float, ...]],
+        readings: tuple[tuple[float, ...], ...],
+        *,
+        sign_only: bool = False,
+    ) -> tuple[float, ...]:
+        return tuple(
+            agent.FULL_EXPOSURE
+            if sum(
+                (float(np.sign(weight)) if sign_only else weight) * value
+                for weight, value in zip(row, reading, strict=True)
+            )
+            > ENTRY_OFF_ZERO
+            else 0.0
+            for row, reading in zip(weights, readings, strict=True)
+        )
+
+    for agent_id, rate in TWO_RATES.items():
+        own = scaled(rate)
+        (other_rate,) = (r for other, r in TWO_RATES.items() if other != agent_id)
+        gap = max(
+            abs(mine - theirs)
+            for row, reference in zip(consumed[agent_id], own, strict=True)
+            for mine, theirs in zip(row, reference, strict=True)
+        )
+        assert gap < 1e-9, (
+            f"{agent_id!r} consumed readings up to {gap} from the causal "
+            f"standardisation at its own forgetting rate {rate}"
+        )
+        margin = min(
+            abs(sum(w * v for w, v in zip(row, reading, strict=True)) - ENTRY_OFF_ZERO)
+            for row, reading in zip(carried[agent_id], own, strict=True)
+        )
+        assert margin > 1e-9, (
+            f"a reading of {agent_id!r} sits {margin} from the entry gene, where "
+            "rounding rather than the rule could decide the wish"
+        )
+
+        expected = wishes(carried[agent_id], own)
+        by_sign = wishes(carried[agent_id], own, sign_only=True)
+        by_other_rate = wishes(carried[agent_id], scaled(other_rate))
+        assert expected != by_sign, (
+            f"read by sign alone, {agent_id!r}'s weights wish exactly as they do "
+            "read whole, so this case cannot see how big a learned weight is"
+        )
+        assert expected != by_other_rate, (
+            f"scaled at {other_rate} instead of its own {rate}, {agent_id!r} "
+            "wishes exactly as it does, so this case cannot see whose rate "
+            "scales an agent's inputs"
+        )
+        assert tuple(wanted[agent_id]) == expected, (
+            f"{agent_id!r} formed wishes that the weights it carried and the "
+            f"causal standardisation at its own rate {rate} do not imply, at "
+            f"{sum(a != b for a, b in zip(wanted[agent_id], expected, strict=True))} "
+            f"of {len(expected)} decision points"
+        )

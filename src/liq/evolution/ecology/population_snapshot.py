@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
+import numpy as np
+
 from liq.evolution.ecology.types import (
     AgentId,
     BarWindow,
+    UtcTimestamp,
 )
 
 from .agent_contracts import (
     AgentBornUnderAnotherVocabulary,
     AgentSnapshot,
+    PendingReading,
     PopulationSnapshot,
     StorageReport,
 )
+from .agent_genes import STORAGE_DTYPE
 from .population_state_fields import _PopulationStateFields
 
 
@@ -37,6 +44,57 @@ class _SnapshotMixin(_PopulationStateFields):
             ),
             history_capacity=self.history_capacity,
             learning=self.learning,
+            bounds_reached=tuple(self._bounds_reached),
+            pending=self._pending(),
+        )
+
+    def _pending(self) -> PendingReading | None:
+        """The reading awaiting its outcome, by agent, or ``None`` if none is."""
+        if self._shown is None:
+            return None
+        as_of, standardised = self._shown
+        return PendingReading(
+            as_of=as_of,
+            readings=MappingProxyType(
+                {
+                    agent_id: tuple(standardised[row].tolist())
+                    for row, agent_id in enumerate(self._ids)
+                }
+            ),
+        )
+
+    def _resume_pending(
+        self, pending: PendingReading | None
+    ) -> tuple[UtcTimestamp, np.ndarray] | None:
+        """Take back the reading a snapshot was put away awaiting the outcome of.
+
+        Refused rather than trimmed or padded when it does not fit: a reading
+        for an agent not alive here, or missing one that is, or of another
+        width, is a reading an outcome could not be paired with.
+        """
+        if pending is None:
+            return None
+        if self._update is None:
+            raise ValueError(
+                "the snapshot carries a reading awaiting its outcome, and the "
+                "population it restores to does not learn, so nothing could "
+                "ever take that outcome"
+            )
+        if set(pending.readings) != set(self._ids):
+            raise ValueError(
+                f"the pending reading is for {sorted(pending.readings)} where "
+                f"the living are {sorted(self._ids)}; an outcome is owed to "
+                "exactly the agents that formed the reading"
+            )
+        widths = {len(reading) for reading in pending.readings.values()}
+        if widths != {self._features}:
+            raise ValueError(
+                f"the pending reading carries {sorted(widths)} values per agent "
+                f"where the population reads {self._features} features"
+            )
+        return pending.as_of, np.asarray(
+            [pending.readings[agent_id] for agent_id in self._ids],
+            dtype=STORAGE_DTYPE,
         )
 
     def storage(self) -> StorageReport:

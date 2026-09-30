@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 
 __all__ = [
     "DEFAULT_ABSOLUTE_PENALTY",
-    "DEFAULT_COLD_START_WEIGHT",
     "DEFAULT_FORGETTING_MAXIMUM",
     "DEFAULT_FORGETTING_MINIMUM",
     "DEFAULT_HISTORY_CAPACITY",
@@ -60,11 +59,6 @@ WEIGHT_NORM_BOUND_KEY = "learning.weight_norm_bound"
 #: whatever call site happened to build a population. That is why it is here and
 #: not beside the array it bounds.
 DEFAULT_HISTORY_CAPACITY = 32
-
-#: What an agent's learned weights are before it has been shown any outcome.
-#: Zero rather than a small number: an agent that has learned nothing carries
-#: nothing, and any other value would be a prior nobody chose.
-DEFAULT_COLD_START_WEIGHT = 0.0
 
 #: The range a forgetting factor read from a genome is confined to. Strictly
 #: inside (0, 1]: at zero an agent would remember only the bar in front of it,
@@ -131,7 +125,7 @@ class PopulationConfig:
 class LearningConfig:
     """Every quantity the online update is allowed to be turned by.
 
-    All nine are keys rather than literals, and that is the point of the class
+    All eight are keys rather than literals, and that is the point of the class
     existing at all. A bound written into the estimator is a bound nobody can
     read off a finished run; a bound written into a check is a bound whoever
     wrote the check chose. Here they are part of the configuration a run is
@@ -142,8 +136,6 @@ class LearningConfig:
     turn them: a constant nobody can recover is a constant nobody can check.
 
     Attributes:
-        cold_start_weight: What every learned weight is before the agent has
-            been shown an outcome.
         forgetting_minimum: The smallest forgetting factor a genome may carry.
         forgetting_maximum: The largest. Strictly inside (0, 1] together with
             the minimum, so no agent either remembers only the last bar or
@@ -164,7 +156,6 @@ class LearningConfig:
             if either bound is not positive, or if a step constant is not.
     """
 
-    cold_start_weight: float = DEFAULT_COLD_START_WEIGHT
     forgetting_minimum: float = DEFAULT_FORGETTING_MINIMUM
     forgetting_maximum: float = DEFAULT_FORGETTING_MAXIMUM
     state_bound: float = DEFAULT_STATE_BOUND

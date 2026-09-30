@@ -36,11 +36,12 @@ peeking version, so one mechanism carries both halves of the claim.
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from liq.evolution.ecology import agent
+from liq.evolution.ecology import agent, learning
 from liq.evolution.ecology.types import BarWindow, InstrumentId, UtcTimestamp
 
 #: Dotted names of the configured quantities the checks below read. Held here
@@ -50,7 +51,6 @@ STATE_BOUND_KEY = "learning.state_bound"
 WEIGHT_NORM_BOUND_KEY = "learning.weight_norm_bound"
 FORGETTING_MINIMUM_KEY = "learning.forgetting_minimum"
 FORGETTING_MAXIMUM_KEY = "learning.forgetting_maximum"
-COLD_START_WEIGHT_KEY = "learning.cold_start_weight"
 HISTORY_CAPACITY_KEY = "population.history_capacity"
 
 
@@ -156,7 +156,9 @@ def judge(
     Both bounds are judged in one pass and the first one to be exceeded is
     named, because "the state stayed bounded" and "the weights stayed bounded"
     are two claims and a report that collapsed them would not say which
-    guardrail was the one that held.
+    guardrail was the one that held. A norm that is not a number is a breach:
+    it is not inside the bound, and an oracle that read it as bounded would
+    report an agent the arithmetic had already lost as one it was holding.
     """
     if not (len(stamps) == len(state_norms) == len(weight_norms)):
         raise ValueError(
@@ -169,16 +171,19 @@ def judge(
     for index, (state_norm, weight_norm) in enumerate(
         zip(state_norms, weight_norms, strict=True)
     ):
-        if state_norm > state_bound:
+        # Written as "not inside" rather than "above": every comparison with a
+        # not-a-number is false, so "above" would report a norm nobody can
+        # compare with anything as bounded.
+        if not state_norm <= state_bound:
             breach_index, breach_of = index, STATE_BOUND_KEY
             break
-        if weight_norm > weight_norm_bound:
+        if not weight_norm <= weight_norm_bound:
             breach_index, breach_of = index, WEIGHT_NORM_BOUND_KEY
             break
     return BoundReport(
         bars=len(stamps),
-        largest_state_norm=max(state_norms, default=0.0),
-        largest_weight_norm=max(weight_norms, default=0.0),
+        largest_state_norm=_largest(state_norms),
+        largest_weight_norm=_largest(weight_norms),
         first_breach_index=breach_index,
         first_breach_at=None if breach_index is None else stamps[breach_index],
         first_breach_of=breach_of,
@@ -245,6 +250,17 @@ def _scale(mass: float, total: float, squares: float, value: float) -> float:
     return (value - mean) / spread
 
 
+def _largest(values: Sequence[float]) -> float:
+    """The largest of ``values``, or not-a-number if any of them is one.
+
+    ``max`` over a sequence holding a not-a-number returns whatever the
+    comparisons happen to leave standing, which depends on where it sits.
+    """
+    if any(value != value for value in values):
+        return float("nan")
+    return max(values, default=0.0)
+
+
 def sampled(
     state: agent.PopulationState,
     agent_id: str,
@@ -254,11 +270,86 @@ def sampled(
     Two numbers rather than one, because FR-3 bounds two different things: the
     gain, covariance or accumulator the estimator carries, and the weight vector
     it produces. An estimator can hold one while losing the other.
+
+    The gain is recomputed from the stored accumulators by
+    :func:`gain_from_accumulators` rather than read off
+    :meth:`~agent.PopulationState.estimator_state`, for the reason given there.
     """
     return (
-        _norm(state.estimator_state(agent_id).values()),
+        _norm(gain_from_accumulators(state, agent_id)),
         _norm(state.learned_weights(agent_id).values()),
     )
+
+
+def gain_from_accumulators(
+    state: agent.PopulationState, agent_id: str
+) -> tuple[float, ...]:
+    """The gain one agent's *next* update will apply, recomputed from what is stored.
+
+    Read from the ``update.energy.`` columns of the learned state — the
+    accumulators the next update starts from — and not from the accessor the
+    implementation reports the gain through. A bound that recorded a breach
+    and clipped only the *reported* gain, while the estimator went on from the
+    unheld accumulator, would read as held through the accessor and as what it
+    is here. The recorded hold has to be the state the update continues from.
+
+    The formula is FTRL-Proximal's own, ``step_scale / (step_offset +
+    sqrt(energy))``, restated here rather than imported so the oracle does not
+    agree with the implementation whatever either does. It is the selected
+    family's; a change of family is a change to this function too.
+
+    Raises:
+        KeyError: If the population does not declare an energy column for a
+            feature it reads — a learner whose state this oracle cannot see.
+    """
+    configured = state.learning
+    if configured is None:
+        raise ValueError(
+            f"{agent_id!r} belongs to a population that does not learn, so it "
+            "has no accumulator to recompute a gain from"
+        )
+    stored = state.learned_state(agent_id)
+    return tuple(
+        configured.step_scale
+        / (
+            configured.step_offset
+            + math.sqrt(float(stored[f"{learning.ENERGY_PREFIX}{name}"]))
+        )
+        for name in state.feature_names
+    )
+
+
+def weights_from_accumulators(
+    state: agent.PopulationState, agent_id: str
+) -> tuple[float, ...]:
+    """The weights one agent's stored accumulators imply, by the closed form.
+
+    The weight-bound counterpart of :func:`gain_from_accumulators`. The weight
+    bound is held by scaling the ``update.drift.`` accumulator, because the
+    closed form recomputes the weights from it at every outcome; a hold that
+    trimmed only the stored weight would be undone by the next one. So what the
+    accumulators imply is what has to sit inside the bound, and it has to agree
+    with the weight the rule reads.
+    """
+    configured = state.learning
+    if configured is None:
+        raise ValueError(
+            f"{agent_id!r} belongs to a population that does not learn, so it "
+            "has no accumulator to recompute a weight from"
+        )
+    stored = state.learned_state(agent_id)
+    implied: list[float] = []
+    for name in state.feature_names:
+        drift = float(stored[f"{learning.DRIFT_PREFIX}{name}"])
+        energy = float(stored[f"{learning.ENERGY_PREFIX}{name}"])
+        step = (
+            configured.step_offset + math.sqrt(energy)
+        ) / configured.step_scale + configured.squared_penalty
+        excess = abs(drift) - configured.absolute_penalty
+        implied.append(
+            0.0 if excess <= 0.0 else -(excess if drift > 0 else -excess) / step
+        )
+    return tuple(implied)
 
 
 def _norm(values: Iterable[float]) -> float:

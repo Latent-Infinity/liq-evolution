@@ -40,6 +40,24 @@ class ForgettingFactorOutsideItsRange(EcologyError):
     """
 
 
+class StartingStateOutsideItsBound(EcologyError):
+    """An agent would start with a learned state its configuration disallows.
+
+    Checked when an agent is admitted at birth, over whatever it starts from —
+    the prior its genome declares, or a state it inherited — and computed
+    exactly as the bound applied after each outcome computes it. Refused rather
+    than clipped or rescaled: a starting weight silently pulled inside the
+    bound is a prior nobody chose, and would make the declared gene decorative.
+    A non-finite weight is refused for the same reason, because no norm of it
+    is a number the bound could be compared with.
+
+    An *inherited* state is also refused when its gain is outside the state
+    bound. Holding it would change what crossed the birth boundary, which is
+    the thing inheritance is measured by. A birth carrying nothing is never
+    refused on its gain: its founding gain is held and recorded instead.
+    """
+
+
 class PopulationDoesNotLearn(EcologyError):
     """Something asked a population with no configured update to learn.
 
@@ -57,6 +75,34 @@ class OutcomeFromTheSameBar(EcologyError):
     on over the bar after it, so the outcome of holding it cannot be known at
     the instant it was formed; an update fed one would be fitting the answer to
     itself. The refusal is here rather than in a reviewer's attention.
+    """
+
+
+class FeatureNotFinite(EcologyError):
+    """A feature value the view offered was not a finite number.
+
+    Refused rather than absorbed, and never replaced. Folded into the
+    standardiser, one not-a-number makes that feature's moments not-a-number
+    for good. Standardised, it makes the reading not-a-number, and the first
+    outcome learned from that reading turns every learned weight it touches
+    into one. Substituting a value, whether zero, the last one or a mean,
+    would be inventing a feature nobody computed. The whole decision point is
+    refused before anything moves, so the population is left exactly as it
+    was.
+    """
+
+
+class OutcomeNotFinite(EcologyError):
+    """An outcome offered to the update was not a finite number.
+
+    Refused rather than absorbed, and never replaced. One not-a-number folded
+    into the accumulators makes every weight and gain it touches not-a-number
+    from then on: the agent goes flat at every later decision point, no bound
+    records anything because no comparison with it is true, and nothing says
+    why. Substituting a value — zero, the last one, a mean — would be inventing
+    what a bar earned. The whole observation is refused and the population is
+    left exactly as it was, so a finite outcome for the same reading is still
+    accepted.
     """
 
 
@@ -127,7 +173,10 @@ class AgentBirth:
         agent_id: Identity the agent is known by for the rest of its life.
         genome: The heritable part.
         learned_state: What the agent starts out having learned, by name. The
-            names declared here are the names it can ever learn under.
+            names declared here are the names it can ever learn under. In a
+            population that learns this is either empty — the agent starts
+            from its own genome's priors — or exactly the columns the update
+            declares, carried verbatim; anything else is refused.
         feature_schema_version: Feature vocabulary it is born under.
         model_version: Decision model it is born under.
         parents: Who it was born of. Empty for a founder.
@@ -183,6 +232,31 @@ class AgentSnapshot:
 
 
 @dataclass(frozen=True)
+class PendingReading(_UtcTimestampMixin):
+    """A decision point answered whose outcome is not known yet.
+
+    The one part of a population that belongs to no agent's columns and cannot
+    be rebuilt from them. An outcome is learned from by pairing it with the
+    standardised reading it followed, and that reading was formed — and the
+    statistics it was scaled by were moved past it — at the decision point.
+    A snapshot taken before the outcome arrives that did not carry it would
+    restore to a population refusing the outcome it is owed, and re-forming
+    the reading would scale it by statistics that already include it.
+
+    Attributes:
+        as_of: The decision instant the reading was formed at (UTC).
+        readings: Each living agent's standardised reading, in the
+            population's feature order.
+    """
+
+    as_of: UtcTimestamp
+    readings: Mapping[AgentId, tuple[float, ...]]
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+
+
+@dataclass(frozen=True)
 class PopulationSnapshot:
     """Every living agent at one instant, and the shape they were held in.
 
@@ -198,11 +272,18 @@ class PopulationSnapshot:
             learned columns are meaningless without the constants that produced
             them, so a resume under a different configuration would be a
             different agent wearing the same weights.
+        bounds_reached: Every declared bound that had acted, in the order it
+            acted. A run held under a bound says so, and a resume that forgot
+            it had been held would describe the same run as one that never was.
+        pending: The reading awaiting its outcome, or ``None`` at a settled
+            boundary. See :class:`PendingReading`.
     """
 
     agents: tuple[AgentSnapshot, ...]
     history_capacity: int
     learning: LearningConfig | None = None
+    bounds_reached: tuple[BoundReached, ...] = ()
+    pending: PendingReading | None = None
 
 
 @dataclass(frozen=True)
@@ -214,18 +295,41 @@ class BoundReached(_UtcTimestampMixin):
     was warned about. A guardrail that only logged would leave every figure
     after it computed from a state nobody was watching.
 
+    A bound can also act when an agent is founded. A newly founded agent that
+    has learned nothing carries its family's largest gain, so a state bound
+    below that gain is met before the first decision point. The gain is held
+    then, and the hold is recorded then, marked ``at_founding``. No instant is
+    invented for it. It carries the agent's birth instant where the birth
+    states one, and ``None`` otherwise, which means "at founding, before any
+    decision point".
+
     Attributes:
         agent_id: Whose state met the bound.
-        as_of: The decision instant the outcome belonged to (UTC).
+        as_of: The instant the outcome that met it became known (UTC). For a
+            founding hold, the agent's birth instant, or ``None`` for a founder
+            born at no stated instant.
         bound: Which bound, by the dotted name its configuration declares it
             under, so a reader can look the number up rather than guess it.
+        at_founding: Whether the bound acted when the agent was founded rather
+            than at an outcome.
+
+    Raises:
+        ValueError: If a record that is not a founding hold carries no instant.
     """
 
     agent_id: AgentId
-    as_of: UtcTimestamp
+    as_of: UtcTimestamp | None
     bound: str
+    at_founding: bool = False
 
     def __post_init__(self) -> None:
+        if self.as_of is None:
+            if not self.at_founding:
+                raise ValueError(
+                    f"a bound that acted on {self.agent_id!r} at an outcome must "
+                    "say when; only a founding hold may carry no instant"
+                )
+            return
         self._normalize_timestamps("as_of")
 
 

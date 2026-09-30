@@ -4,6 +4,7 @@ from types import MappingProxyType
 from liq.evolution.ecology.driver import WalkReport
 from liq.evolution.ecology.logctx import SILENT, RunLog
 from liq.evolution.ecology.ports import ExecutionSimulator, RiskSizer
+from liq.evolution.ecology.step import DecisionStep
 from liq.evolution.ecology.types import (
     AccountState,
     AgentId,
@@ -28,7 +29,6 @@ from .accounts import (
     IntentFormer,
     _what_execution_did,
     _what_the_mandate_decided,
-    what_the_reading_earned,
 )
 
 
@@ -140,8 +140,7 @@ class _EvaluationAccount:
     log: RunLog = SILENT
     held: float = FLAT
     charged: float = NOTHING_CHARGED
-    previous_close: float | None = None
-    previous_as_of: UtcTimestamp | None = None
+    step: DecisionStep = field(default_factory=DecisionStep)
     pending: PositionTarget | None = None
     states: list[AccountState] = field(default_factory=list)
     fills: list[Fill | NotFilled] = field(default_factory=list)
@@ -154,17 +153,27 @@ class _EvaluationAccount:
 
         The order is the accounting: the previous outcome is delivered before anything acts, what was held is carried into the open, the target
         formed a bar ago is acted on and charged there, what is then held is carried to the close, the account is published, and only then is the
-        next target formed.
+        next target formed. The settle-then-decide half of that order is the shared step's, so an account and anything that walks the rule
+        without one take decision points the same way; the accounting in between is this account's own.
         """
         bar = self._priced(window)
-        self._deliver_the_previous_outcome(window.as_of, bar)
-        self._carry(self.previous_close, bar.open)
-        self._act_on_what_was_decided_a_bar_ago(bar, window.as_of)
+        self._record_what_the_updates_consumed(window.as_of)
+        self.step.take(
+            window,
+            bar,
+            settle=self.agent.observe,
+            meanwhile=lambda: self._account_for_the_bar(bar, window.as_of),
+            decide=lambda: self._form_the_target_the_next_bar_acts_on(
+                window, self.states[-1]
+            ),
+        )
+
+    def _account_for_the_bar(self, bar: Bar, as_of: UtcTimestamp) -> None:
+        """Carry into the open, act on last bar's target, carry to the close, publish."""
+        self._carry(self.step.previous_close, bar.open)
+        self._act_on_what_was_decided_a_bar_ago(bar, as_of)
         self._carry(bar.open, bar.close)
-        published = self._publish(window.as_of)
-        self._form_the_target_the_next_bar_acts_on(window, published)
-        self.previous_close = bar.close
-        self.previous_as_of = window.as_of
+        self._publish(as_of)
 
     def _priced(self, window: BarWindow) -> Bar:
         """The bar this decision point prices the followed instrument at."""
@@ -177,32 +186,27 @@ class _EvaluationAccount:
             )
         return bar
 
-    def _deliver_the_previous_outcome(self, as_of: UtcTimestamp, bar: Bar) -> None:
+    def _record_what_the_updates_consumed(self, as_of: UtcTimestamp) -> None:
         """
-        Show the agent what its last reading earned, and record what was consumed.
+        Record what this decision point's learning and fitness updates consumed.
 
         Both update paths consume the decision point before this one, because a decision taken inside a bar may not be told the outcome of the
         decision it is about to take. The two are recorded apart because they are two update paths, and a run can get one right while the other
         reaches forward.
 
-        The learning line is no longer only a record. The reading the agent formed at the previous decision point is settled here, against the move
-        the instrument made over the bar it was acted on; the agent is shown that outcome stamped at this instant, which is when it became knowable,
-        and it is paired with the reading by the agent's own refusal rather than by this loop's care. At the first decision point of a pass there is
-        no reading behind it and nothing is shown.
+        The learning line is no longer only a record. The reading the agent formed at the previous decision point is settled by the shared step
+        straight after this, against the move the instrument made over the bar it was acted on; the agent is shown that outcome stamped at this
+        instant, which is when it became knowable, and it is paired with the reading by the agent's own refusal rather than by this loop's care.
+        At the first decision point of a pass there is no reading behind it and nothing is shown.
         """
         self.events.extend(
             AccountEvent(
                 agent_id=self.agent.agent_id,
                 as_of=as_of,
                 kind=kind,
-                consumed_as_of=self.previous_as_of,
+                consumed_as_of=self.step.previous_as_of,
             )
             for kind in (LEARNING, FITNESS)
-        )
-        if self.previous_close is None:
-            return
-        self.agent.observe(
-            as_of, what_the_reading_earned(self.previous_close, bar.close)
         )
 
     def _carry(self, from_price: float | None, to_price: float) -> None:

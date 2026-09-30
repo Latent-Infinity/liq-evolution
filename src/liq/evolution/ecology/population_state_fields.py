@@ -11,7 +11,13 @@ from liq.evolution.ecology import learning as online
 from liq.evolution.ecology.config import LearningConfig
 from liq.evolution.ecology.types import AgentId, BarWindow, Genome, UtcTimestamp
 
-from .agent_contracts import AgentSnapshot, AgentVersions, BoundReached, Lineage
+from .agent_contracts import (
+    AgentSnapshot,
+    AgentVersions,
+    BoundReached,
+    Lineage,
+    PendingReading,
+)
 
 
 class _PopulationStateFields(ABC):
@@ -63,3 +69,8 @@ class _PopulationStateFields(ABC):
 
     @abstractmethod
     def _refuse_a_vocabulary_nobody_was_born_under(self, window: BarWindow) -> None: ...
+
+    @abstractmethod
+    def _resume_pending(
+        self, pending: PendingReading | None
+    ) -> tuple[UtcTimestamp, np.ndarray] | None: ...

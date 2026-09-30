@@ -70,14 +70,18 @@ def test_agent_module_keeps_its_public_api_and_class_identity() -> None:
         "AgentSnapshot",
         "AgentVersions",
         "BoundReached",
+        "FeatureNotFinite",
         "ForgettingFactorOutsideItsRange",
         "Lineage",
         "NothingWasShown",
         "OutcomeFromTheSameBar",
+        "OutcomeNotFinite",
+        "PendingReading",
         "PopulationDoesNotLearn",
         "PopulationSnapshot",
         "PopulationState",
         "PopulationStep",
+        "StartingStateOutsideItsBound",
         "StorageReport",
     ]
     assert all(hasattr(agent_module, name) for name in agent_module.__all__)
@@ -94,14 +98,18 @@ def test_agent_module_keeps_its_public_api_and_class_identity() -> None:
             "AgentSnapshot",
             "AgentVersions",
             "BoundReached",
+            "FeatureNotFinite",
             "ForgettingFactorOutsideItsRange",
             "Lineage",
             "NothingWasShown",
             "OutcomeFromTheSameBar",
+            "OutcomeNotFinite",
+            "PendingReading",
             "PopulationDoesNotLearn",
             "PopulationSnapshot",
             "PopulationState",
             "PopulationStep",
+            "StartingStateOutsideItsBound",
             "StorageReport",
         }
     )
@@ -138,7 +146,7 @@ def _reading(entry: float) -> Agent:
     return _agent(
         **{
             f"{MASK_PREFIX}{LEVEL}": 1.0,
-            f"{WEIGHT_PREFIX}{LEVEL}": 1.0,
+            f"{WEIGHT_PREFIX}{LEVEL}": 0.0,
             ENTRY_THRESHOLD: entry,
             FORGETTING_FACTOR: FORGETS_AT,
         }
@@ -180,8 +188,8 @@ def test_a_reading_that_does_not_clear_the_entry_gene_wants_nothing() -> None:
 def test_a_weight_the_agent_has_not_learned_yet_reads_as_nothing() -> None:
     """At its cold start an agent reads nothing off any view, and says so.
 
-    The declared cold start is zero, so the reading is exactly zero however
-    large the scaled feature is — which is a deterministic, observable starting
+    This agent's prior — its ``weight.`` gene — is zero, so the reading is
+    exactly zero however large the scaled feature is — which is a deterministic, observable starting
     behaviour rather than an accident of an uninitialised array.
     """
     agent = _reading(entry=0.0)
@@ -201,7 +209,7 @@ def test_a_feature_switched_off_is_not_read_however_much_it_was_learned() -> Non
     agent = _agent(
         **{
             f"{MASK_PREFIX}{LEVEL}": SWITCHED_ON_AT / 2.0,
-            f"{WEIGHT_PREFIX}{LEVEL}": 1.0,
+            f"{WEIGHT_PREFIX}{LEVEL}": 0.0,
             ENTRY_THRESHOLD: 0.0,
             FORGETTING_FACTOR: FORGETS_AT,
         }
@@ -234,7 +242,7 @@ def test_a_genome_with_no_entry_gene_cannot_be_born() -> None:
         _agent(
             **{
                 f"{MASK_PREFIX}{LEVEL}": 1.0,
-                f"{WEIGHT_PREFIX}{LEVEL}": 1.0,
+                f"{WEIGHT_PREFIX}{LEVEL}": 0.0,
                 FORGETTING_FACTOR: FORGETS_AT,
             }
         )

@@ -45,9 +45,11 @@ MODEL_VERSION = "population-model-1"
 LEVEL = "level"
 STEP = "step"
 
-#: What an agent here can learn beyond the columns the update declares for
-#: itself. Named so a learned value could never be mistaken for a gene.
-OBSERVED = "observations"
+#: One of the columns the update declares, written directly by the checks
+#: that are about what an agent can learn rather than about how it learns.
+#: A learning population declares exactly the update's columns at birth, so
+#: there is no other name to write.
+OBSERVED = f"{LEARNED_WEIGHT_PREFIX}{STEP}"
 
 #: A gene the step reads only through the update, carried by every genome here
 #: because a population that learns refuses one that does not carry it.
@@ -68,7 +70,7 @@ LEANS_LONG = 1.0
 BEYOND_ANY_READING = 1e12
 
 
-def _genes(*, step_weight: float = 1.0, entry: float = 0.0) -> dict[str, float]:
+def _genes(*, step_weight: float = 0.0, entry: float = 0.0) -> dict[str, float]:
     """A readable genome over both ramp features, plus one gene nothing steps on."""
     return {
         f"{MASK_PREFIX}{LEVEL}": 0.0,
@@ -81,7 +83,7 @@ def _genes(*, step_weight: float = 1.0, entry: float = 0.0) -> dict[str, float]:
 
 
 def _birth(
-    agent_id: str, *, step_weight: float = 1.0, entry: float = 0.0
+    agent_id: str, *, step_weight: float = 0.0, entry: float = 0.0
 ) -> AgentBirth:
     """One agent entering the population."""
     return AgentBirth(
@@ -90,7 +92,7 @@ def _birth(
             genes=_genes(step_weight=step_weight, entry=entry),
             schema_version=GENE_SCHEMA_VERSION,
         ),
-        learned_state={OBSERVED: 0.0},
+        learned_state={},
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         model_version=MODEL_VERSION,
     )
@@ -314,10 +316,10 @@ def test_the_population_reports_the_shape_it_is_actually_held_in() -> None:
     assert storage.agents == 1
     assert storage.gene_columns == 6
     assert storage.feature_columns == 2
-    # What the birth declared, plus the columns the update declares for itself:
-    # a weight, a drift and an energy per feature, the standardiser's two
-    # moments per feature, and the one mass they are divided by.
-    assert storage.learned_columns == 1 + 5 * 2 + 1
+    # Exactly the columns the update declares, and nothing a birth added: a
+    # weight, a drift and an energy per feature, the standardiser's two moments
+    # per feature, and the one mass they are divided by.
+    assert storage.learned_columns == 5 * 2 + 1
     assert storage.history_capacity == 7
     assert storage.dtype == "float64"
     assert storage.contiguous
@@ -336,7 +338,7 @@ def test_ten_thousand_agents_over_sixty_four_features_step_as_one_product() -> N
     features = tuple(f"feature_{index:02d}" for index in range(64))
     genes = {
         **{f"{MASK_PREFIX}{name}": 1.0 for name in features},
-        **{f"{WEIGHT_PREFIX}{name}": 1.0 for name in features},
+        **{f"{WEIGHT_PREFIX}{name}": 0.0 for name in features},
         ENTRY_THRESHOLD: 0.0,
         FORGETTING: 0.97,
     }

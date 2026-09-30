@@ -55,7 +55,11 @@ zero standardises to wherever zero sits among the bars behind it — which is a
 perfectly definite, perfectly wrong opinion about a value nobody has. So what
 the view offers is carried alongside the mask and multiplied into the reading:
 a feature nobody broadcast contributes exactly nothing, whatever the agent has
-learned about it and whatever the statistics behind it say. *Known narrowness,
+learned about it and whatever the statistics behind it say. The update learns
+from that same masked reading, computed once and put aside for the outcome. A
+feature switched off or withheld therefore adds nothing to the prediction
+error and no gradient to any weight, and an agent never acts on weights fitted
+to a prediction it does not make. *Known narrowness,
 recorded rather than papered over:* the withheld zero is still folded into that
 feature's own forgetting-weighted moments, because the standardiser's mass is
 one column shared by every feature and separating it is a change to what an
@@ -112,13 +116,17 @@ from .agent_contracts import (
     AgentSnapshot,
     AgentVersions,
     BoundReached,
+    FeatureNotFinite,
     ForgettingFactorOutsideItsRange,
     Lineage,
     NothingWasShown,
     OutcomeFromTheSameBar,
+    OutcomeNotFinite,
+    PendingReading,
     PopulationDoesNotLearn,
     PopulationSnapshot,
     PopulationStep,
+    StartingStateOutsideItsBound,
     StorageReport,
 )
 from .agent_facade import Agent
@@ -151,14 +159,18 @@ __all__ = [
     "AgentSnapshot",
     "AgentVersions",
     "BoundReached",
+    "FeatureNotFinite",
     "ForgettingFactorOutsideItsRange",
     "Lineage",
     "NothingWasShown",
     "OutcomeFromTheSameBar",
+    "OutcomeNotFinite",
+    "PendingReading",
     "PopulationDoesNotLearn",
     "PopulationSnapshot",
     "PopulationState",
     "PopulationStep",
+    "StartingStateOutsideItsBound",
     "StorageReport",
 ]
 
@@ -199,14 +211,18 @@ for _public_type in (
     AgentSnapshot,
     AgentVersions,
     BoundReached,
+    FeatureNotFinite,
     ForgettingFactorOutsideItsRange,
     Lineage,
     NothingWasShown,
     OutcomeFromTheSameBar,
+    OutcomeNotFinite,
+    PendingReading,
     PopulationDoesNotLearn,
     PopulationSnapshot,
     PopulationStep,
     PopulationState,
+    StartingStateOutsideItsBound,
     StorageReport,
 ):
     _public_type.__module__ = __name__

@@ -168,6 +168,26 @@ class OnlineUpdate:
         """What each agent has learned, one row per agent, in feature order."""
         return learned[:, self._weight_at]
 
+    def unfit_to_start(
+        self, learned: NDArray[np.float64], carried: NDArray[np.bool_]
+    ) -> NDArray[np.bool_]:
+        """Which agents would start outside what their bounds admit.
+
+        The norms are the ones :meth:`observe` holds, computed the same way, so
+        an agent admitted here is one the bound would not have acted on. A
+        weight that is not finite is unfit whatever its norm compares as. The
+        gain is checked only where ``carried`` says the start was inherited,
+        and it is unfit unless it is inside the state bound, so a gain that is
+        not a number is unfit as well. A start built from a prior has its
+        founding gain held by :func:`founding_energy`, never refused.
+        """
+        weights = self.weights(learned)
+        return (
+            ~np.isfinite(weights).all(axis=1)
+            | (self.weight_norms(learned) > self._config.weight_norm_bound)
+            | (carried & ~(self.state_norms(learned) <= self._config.state_bound))
+        )
+
     def state_norms(self, learned: NDArray[np.float64]) -> NDArray[np.float64]:
         """How big each agent's gain is, as one number per agent."""
         return np.linalg.norm(self.gains(learned), axis=1)
@@ -178,7 +198,7 @@ class OnlineUpdate:
 
     def _gain_from(self, energy: NDArray[np.float64]) -> NDArray[np.float64]:
         """The gain implied by an accumulated squared gradient."""
-        return self._config.step_scale / (self._config.step_offset + np.sqrt(energy))
+        return _gain_from(self._config, energy)
 
     def _weights_from(
         self, drift: NDArray[np.float64], energy: NDArray[np.float64]
@@ -194,24 +214,8 @@ class OnlineUpdate:
     def _hold_the_gain(
         self, energy: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
-        """Raise accumulated evidence until the gain fits under its bound.
-
-        Acting on the gain rather than recording it is the point: an estimator
-        told to behave as though it had seen more evidence than it has is an
-        estimator whose next step is small, which is what the bound is *for*.
-        Reaching the bound is reported by the flag, so a run does not go quiet
-        about having been held.
-        """
-        bound = self._config.state_bound
-        size = np.linalg.norm(self._gain_from(energy), axis=1)
-        over = size > bound
-        if not over.any():
-            return energy, over
-        held = energy.copy()
-        shrink = (bound / size[over])[:, None]
-        root = (self._config.step_offset + np.sqrt(held[over])) / shrink
-        held[over] = np.maximum(root - self._config.step_offset, 0.0) ** 2
-        return held, over
+        """Raise accumulated evidence until the gain fits under its bound."""
+        return _hold_the_gain(self._config, energy)
 
     def _hold_the_weights(
         self,
@@ -239,6 +243,54 @@ class OnlineUpdate:
         held_drift = drift.copy()
         held_drift[over] *= (bound / size[over])[:, None]
         return held_drift, self._weights_from(held_drift, energy), over
+
+
+def founding_energy(
+    config: LearningConfig, features: Sequence[str]
+) -> tuple[Mapping[str, float], bool]:
+    """The evidence an agent that has learned nothing is founded with, per feature.
+
+    Zero, held under the state bound by the same hold every outcome applies,
+    and there is no second formula. A newly founded agent's gain is the
+    family's ceiling, ``step_scale / step_offset`` per feature. So under a
+    bound at or above that ceiling the hold returns zero unchanged, and under a
+    bound below it the founding evidence is the least the bound admits.
+
+    Returns:
+        The founding evidence by feature, and whether the bound had to act.
+    """
+    held, over = _hold_the_gain(config, np.zeros((1, len(features))))
+    return dict(zip(features, held[0].tolist(), strict=True)), bool(over[0])
+
+
+def _gain_from(
+    config: LearningConfig, energy: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """The gain implied by an accumulated squared gradient."""
+    return config.step_scale / (config.step_offset + np.sqrt(energy))
+
+
+def _hold_the_gain(
+    config: LearningConfig, energy: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Raise accumulated evidence until the gain fits under its bound.
+
+    Acting on the gain rather than recording it is the point: an estimator
+    told to behave as though it had seen more evidence than it has is an
+    estimator whose next step is small, which is what the bound is *for*.
+    Reaching the bound is reported by the flag, so a run does not go quiet
+    about having been held.
+    """
+    bound = config.state_bound
+    size = np.linalg.norm(_gain_from(config, energy), axis=1)
+    over = size > bound
+    if not over.any():
+        return energy, over
+    held = energy.copy()
+    shrink = (bound / size[over])[:, None]
+    root = (config.step_offset + np.sqrt(held[over])) / shrink
+    held[over] = np.maximum(root - config.step_offset, 0.0) ** 2
+    return held, over
 
 
 def _columns(names: Sequence[str], column_of: Mapping[str, int]) -> NDArray[np.intp]:

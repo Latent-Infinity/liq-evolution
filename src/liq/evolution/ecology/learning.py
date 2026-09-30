@@ -71,7 +71,7 @@ from liq.evolution.ecology.learning_state import (
     gain_names,
     weight_names,
 )
-from liq.evolution.ecology.learning_update import OnlineUpdate
+from liq.evolution.ecology.learning_update import OnlineUpdate, founding_energy
 
 __all__ = [
     "DRIFT_PREFIX",
@@ -87,6 +87,7 @@ __all__ = [
     "OnlineUpdate",
     "cold_start",
     "declared_columns",
+    "founding_energy",
     "gain_names",
     "weight_names",
 ]

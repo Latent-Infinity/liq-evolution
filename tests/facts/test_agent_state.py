@@ -68,13 +68,24 @@ DESCRIPTOR_SCHEMA_VERSION = "state-descriptors-1"
 LEVEL = "level"
 STEP = "step"
 
-#: What an agent here has learned. Named so a learned value could never be
-#: mistaken for a gene, which is the point of holding the two apart.
-OBSERVED = "observations"
+#: One column of what an agent here has learned — the weight its update holds
+#: for the switched-on feature. Named so a learned value could never be
+#: mistaken for a gene, which is the point of holding the two apart, and taken
+#: from the update's own columns because a learning population is born
+#: declaring exactly those and nothing else.
+OBSERVED = f"{learning.WEIGHT_PREFIX}{STEP}"
 
 #: Who is alive in every population built here.
 FIRST = "first"
 SECOND = "second"
+
+#: The prior each of them starts its learned weight for the switched-on
+#: feature from — its ``weight.`` gene. Non-zero and different, so a restore
+#: that re-applied the prior instead of reading what was learned would put
+#: each agent somewhere it was not; that each differs from what the agent has
+#: learned by the snapshot point is asserted below rather than assumed.
+FIRST_PRIOR = -0.1
+SECOND_PRIOR = 0.25
 
 #: How fast each of them discards what it learned. Both inside the range the
 #: learning configuration declares, and different from each other, so the two
@@ -84,7 +95,7 @@ SECOND_FORGETS_AT = 0.99
 
 #: The features the genomes above switch on and weight, in the order the
 #: population lays them out. Named so the cold start a lossy restore is built
-#: from is the population's own rather than one this module guesses at.
+#: from is each agent's own rather than one this module guesses at.
 _FEATURES = (LEVEL, STEP)
 
 #: How long after a decision point the outcome of holding what was wanted
@@ -123,7 +134,6 @@ def _birth(
     *,
     step_weight: float,
     entry: float,
-    learned: float,
     forgetting: float,
 ) -> agent.AgentBirth:
     """One agent entering the population, with both its parts stated apart."""
@@ -142,13 +152,13 @@ def _birth(
             ),
             schema_version=GENE_SCHEMA_VERSION,
         ),
-        learned_state=MappingProxyType({OBSERVED: learned}),
+        learned_state=MappingProxyType({}),
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         model_version=MODEL_VERSION,
     )
 
 
-def _founded() -> agent.PopulationState:
+def _founded(learns: config.LearningConfig | None = None) -> agent.PopulationState:
     """Two agents whose wishes differ, and differ over the ramp rather than once.
 
     The first wants exposure while the ramp is young and gives it up as the
@@ -160,20 +170,18 @@ def _founded() -> agent.PopulationState:
         (
             _birth(
                 FIRST,
-                step_weight=-1.0,
+                step_weight=FIRST_PRIOR,
                 entry=0.0,
-                learned=0.0,
                 forgetting=FIRST_FORGETS_AT,
             ),
             _birth(
                 SECOND,
-                step_weight=1.0,
+                step_weight=SECOND_PRIOR,
                 entry=0.0,
-                learned=7.0,
                 forgetting=SECOND_FORGETS_AT,
             ),
         ),
-        learning=config.LearningConfig(),
+        learning=config.LearningConfig() if learns is None else learns,
     )
 
 
@@ -236,9 +244,9 @@ def _walk(
     """Step ``state`` over ``windows``, settling, learning and being scored.
 
     What is handed back after each decision point is deliberately not nothing:
-    an agent reaches the exposure it wanted, records the outcome, counts what
-    it has seen, and — a bar later, which is when it could be known — is shown
-    what holding that exposure earned. A walk that left every mutable part
+    an agent reaches the exposure it wanted, records the outcome, and — a bar
+    later, which is when it could be known — is shown what holding that
+    exposure earned, which moves every column of what it has learned. A walk that left every mutable part
     untouched would make the restore below trivially faithful.
 
     ``from_index`` is where these windows sit in the whole ramp, so that a walk
@@ -253,9 +261,6 @@ def _walk(
         for agent_id, wanted in zip(step.agent_ids, step.wanted, strict=True):
             state.hold(agent_id, wanted)
             state.record_outcome(agent_id, wanted)
-            state.learn(
-                agent_id, {OBSERVED: state.learned_state(agent_id)[OBSERVED] + 1.0}
-            )
         earned = dict.fromkeys(step.agent_ids, _earned(from_index + offset))
         state.observe(window.as_of + OUTCOME_KNOWN_AFTER, earned)
         trajectory.append(
@@ -305,6 +310,59 @@ def test_genome_and_learned_state_separable() -> None:
     assert OBSERVED not in offspring.genes
 
 
+def test_a_learned_state_crosses_a_birth_whole_or_not_at_all() -> None:
+    """What a birth carries of the learned part is what the agent starts with.
+
+    The separability claim is given its reason by the birth boundary, so the
+    fate of a learned state at a birth is pinned here rather than left to the
+    representation. A birth carrying the whole of what its parent learned is
+    founded holding exactly that; a sibling of the same genome carrying nothing
+    is not; and a birth carrying part of it, or part of it and a name nobody
+    declared, is refused rather than resolved by whichever side of a merge wins.
+    """
+    windows = _decision_points()
+    instrument = next(iter(windows[0].bars))
+    parent = _founded()
+    _walk(parent, windows[:SNAPSHOT_AFTER], instrument)
+    carried = dict(parent.learned_state(FIRST))
+    genome = parent.genome(FIRST)
+
+    def born(agent_id: str, learned_state: dict[str, float]) -> agent.AgentBirth:
+        return agent.AgentBirth(
+            agent_id=agent_id,
+            genome=genome,
+            learned_state=MappingProxyType(learned_state),
+            feature_schema_version=FEATURE_SCHEMA_VERSION,
+            model_version=MODEL_VERSION,
+            parents=(FIRST,),
+        )
+
+    offspring = agent.PopulationState.founded(
+        (born("carries", carried), born("carries-nothing", {})),
+        learning=config.LearningConfig(),
+    )
+    assert dict(offspring.learned_state("carries")) == carried
+    assert dict(offspring.learned_state("carries-nothing")) != carried
+
+    partial = {
+        name: value
+        for name, value in carried.items()
+        if not name.startswith(learning.DRIFT_PREFIX)
+    }
+    conflicting = {**carried, "learned.drift.step": 0.0}
+    for refused in (partial, conflicting):
+        try:
+            admitted = agent.PopulationState.founded(
+                (born("refused", refused),), learning=config.LearningConfig()
+            )
+        except ValueError:
+            continue
+        raise AssertionError(
+            f"a birth carrying {sorted(refused)} was admitted holding "
+            f"{dict(admitted.learned_state('refused'))}"
+        )
+
+
 def test_snapshot_restore_preserves_behaviour() -> None:
     """A population put away mid-walk and taken out again does the same next.
 
@@ -350,6 +408,103 @@ def test_snapshot_restore_preserves_behaviour() -> None:
         assert restored.versions(agent_id) == live.versions(agent_id)
         assert restored.realised(agent_id) == live.realised(agent_id)
 
+    # The intent is carried too, and compared on its own: the next decision
+    # point overwrites it, so no trajectory could see it lost, and the
+    # distinction between what an agent wanted and what it holds is the thing
+    # a restore must not flatten.
+    restored_at_the_snapshot = agent.PopulationState.restored(put_away)
+    wanted_there = {held.agent_id: held.intended for held in put_away.agents}
+    assert set(wanted_there.values()) != {0.0}, (
+        "every agent wanted nothing where the population was put away, so a "
+        "snapshot that dropped the intent would drop nothing"
+    )
+    for agent_id, intended in wanted_there.items():
+        assert restored_at_the_snapshot.intended(agent_id) == intended
+
+
+def _stepped(
+    state: agent.PopulationState, window: agent.BarWindow, instrument: str
+) -> agent.PopulationStep:
+    """Answer one decision point the way `_walk` does, and stop before its outcome."""
+    step = state.step(window, instrument)
+    for agent_id, wanted in zip(step.agent_ids, step.wanted, strict=True):
+        state.hold(agent_id, wanted)
+        state.record_outcome(agent_id, wanted)
+    return step
+
+
+def test_a_snapshot_between_a_decision_and_its_outcome_resumes_the_same() -> None:
+    """Put away with an outcome still owed, a population takes that outcome and goes on.
+
+    The unsettled case, which the check above does not reach: the population
+    has answered a decision point and the outcome of what it wanted there is
+    not known yet. That is the one instant a resume cannot rebuild from the
+    agents alone, because the outcome has to be paired with the reading it
+    belongs to and that reading was formed *before* the snapshot. So the
+    restored population has to accept the same outcome the live one does,
+    learn the same thing from it, and go on to do the same over the rest of
+    the walk; and what each wanted and holds has to have come back too.
+    """
+    windows = _decision_points()
+    instrument = next(iter(windows[0].bars))
+    at = SNAPSHOT_AFTER
+
+    live = _founded()
+    _walk(live, windows[:at], instrument)
+    _stepped(live, windows[at], instrument)
+    put_away = live.snapshot()
+    restored = agent.PopulationState.restored(put_away)
+
+    for agent_id in live.agent_ids():
+        assert restored.standardised(agent_id) == live.standardised(agent_id)
+        assert restored.intended(agent_id) == live.intended(agent_id)
+        assert restored.realised(agent_id) == live.realised(agent_id)
+
+    owed = dict.fromkeys(live.agent_ids(), _earned(at))
+    settled_at = windows[at].as_of + OUTCOME_KNOWN_AFTER
+    for state in (live, restored):
+        state.observe(settled_at, owed)
+    assert {
+        agent_id: dict(restored.learned_state(agent_id))
+        for agent_id in restored.agent_ids()
+    } == {agent_id: dict(live.learned_state(agent_id)) for agent_id in live.agent_ids()}
+
+    continued = _walk(live, windows[at + 1 :], instrument, from_index=at + 1)
+    resumed = _walk(restored, windows[at + 1 :], instrument, from_index=at + 1)
+    assert resumed == continued
+    assert len({did.step.wanted for did in continued}) > 1
+
+
+def test_a_restore_keeps_the_record_of_every_bound_that_acted() -> None:
+    """What a population recorded about its bounds is part of what it was.
+
+    A run held under a bound says so, and a resume that forgot saying so would
+    describe the same run as one that was never held. So a population whose
+    bound acted before it was put away comes back carrying every record, in
+    order, and goes on appending to them exactly as the one that was never put
+    away does.
+    """
+    windows = _decision_points()
+    instrument = next(iter(windows[0].bars))
+    held_tightly = config.LearningConfig(state_bound=0.05)
+
+    live = _founded(held_tightly)
+    _walk(live, windows[:SNAPSHOT_AFTER], instrument)
+    recorded = live.bounds_reached()
+    assert recorded, (
+        f"a state bound of {held_tightly.state_bound}, below the gain an agent "
+        "starts with, was never reached, so there is nothing to keep"
+    )
+    restored = agent.PopulationState.restored(live.snapshot())
+    assert restored.bounds_reached() == recorded
+
+    later = _walk(live, windows[SNAPSHOT_AFTER:], instrument, from_index=SNAPSHOT_AFTER)
+    again = _walk(
+        restored, windows[SNAPSHOT_AFTER:], instrument, from_index=SNAPSHOT_AFTER
+    )
+    assert again == later
+    assert restored.bounds_reached() == live.bounds_reached()
+
 
 def test_a_snapshot_that_lost_something_would_be_caught() -> None:
     """The identity above is asserted over something that can fail.
@@ -383,6 +538,13 @@ def test_a_snapshot_that_lost_something_would_be_caught() -> None:
         "the snapshot carries no learned state, so the third seeded loss would "
         "be a loss of nothing"
     )
+    for held in put_away.agents:
+        prior = held.genome.genes[f"{agent.WEIGHT_PREFIX}{STEP}"]
+        assert prior != 0.0 and held.learned_state[OBSERVED] != prior, (
+            f"{held.agent_id!r} holds {held.learned_state[OBSERVED]} where its "
+            f"prior is {prior}, so a restore that re-applied the prior would "
+            "put it nowhere new and the third seeded loss would prove nothing"
+        )
     continued = _walk(
         live, windows[SNAPSHOT_AFTER:], instrument, from_index=SNAPSHOT_AFTER
     )
@@ -414,18 +576,25 @@ def _with_the_learned_state_lost(
 ) -> agent.PopulationSnapshot:
     """The same snapshot with every agent restored as though it had learned nothing.
 
-    Each learned value goes back to what the configuration declares an agent
-    starts out carrying, which is the most plausible way this loss would
-    actually happen: a resume that rebuilt the learned columns from the cold
-    start instead of reading them.
+    Each learned value goes back to where that agent's own genome starts it —
+    its ``weight.`` genes as its prior — which is the most plausible way this
+    loss would actually happen: a resume that re-applied the prior, rebuilding
+    the learned columns from the cold start instead of reading them.
     """
-    started = dict(
-        learning.cold_start(_FEATURES, put_away.learning or config.LearningConfig())
-    )
+    configured = put_away.learning or config.LearningConfig()
     return replace(
         put_away,
         agents=tuple(
-            replace(held, learned_state={**dict(held.learned_state), **started})
+            replace(
+                held,
+                learned_state=learning.cold_start(
+                    {
+                        name: held.genome.genes[f"{agent.WEIGHT_PREFIX}{name}"]
+                        for name in _FEATURES
+                    },
+                    configured,
+                ),
+            )
             for held in put_away.agents
         ),
     )

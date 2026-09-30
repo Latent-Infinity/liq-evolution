@@ -82,6 +82,7 @@ from liq.evolution.ecology.driver import walk
 from liq.evolution.ecology.errors import EcologyError
 from liq.evolution.ecology.logctx import SILENT, Event, RunLog
 from liq.evolution.ecology.ports import BarSource, ExecutionSimulator, RiskSizer
+from liq.evolution.ecology.step import what_the_reading_earned
 from liq.evolution.ecology.types import (
     AgentId,
     BarWindow,
@@ -140,34 +141,6 @@ def _what_execution_did(outcome: Fill | NotFilled) -> Event:
     nothing is a different value from one that traded, and it cannot be mistaken for a fill of nothing.
     """
     return "target_not_reached" if isinstance(outcome, NotFilled) else "target_reached"
-
-
-def what_the_reading_earned(previous_close: float, close: float) -> float:
-    """
-    What the reading formed a bar ago turned out to be worth.
-
-    One definition, in one place, because two would be two answers. A wish formed at one decision point is acted on over the bar that follows
-    it, so what that reading was worth is the move the instrument made across that bar — from the close the reading was formed at to the close
-    it is being settled at — and it is known at the later of the two instants and no earlier.
-
-    It is the instrument's own move rather than the agent's realised profit, and the difference matters: an agent scored on its own profit while
-    flat would be shown zero at every bar it stayed out of, and would learn from its own inaction that nothing predicts anything. What the
-    update is being asked is what holding a full position over that bar would have earned, which is a fact about the tape and not about the
-    wish.
-
-    *Declared by the executor, not by the requirement.* The PRD says the update learns "from realized outcomes" and does not say which realised
-    outcome; the Oracle of 2026-09-27 explicitly took no view on what the update should predict. This is the narrowest quantity that satisfies
-    the sentence and keeps the decision rule interpretable — the reading becomes a prediction of the next bar's move and the entry gene becomes
-    a hurdle on it — and it is named here so that changing it is one edit with one home.
-
-    Args:
-    previous_close: The close the reading was formed at.
-    close: The close the bar it was acted on over finished at.
-
-    Returns:
-    float: The fractional move between the two.
-    """
-    return close / previous_close - 1.0
 
 
 class IntentFormer(Protocol):

@@ -69,7 +69,7 @@ def _reading_two_features(agent_id: str, *, level_on: float) -> AgentBirth:
             f"{MASK_PREFIX}{LEVEL}": level_on,
             f"{WEIGHT_PREFIX}{LEVEL}": 0.0,
             f"{MASK_PREFIX}{STEP}": 1.0,
-            f"{WEIGHT_PREFIX}{STEP}": 1.0,
+            f"{WEIGHT_PREFIX}{STEP}": 0.0,
             ENTRY_THRESHOLD: 0.0,
             FORGETTING_FACTOR: FORGETS_AT,
         },

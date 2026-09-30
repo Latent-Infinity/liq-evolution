@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
 from liq.evolution.ecology import learning as online
 from liq.evolution.ecology.config import (
+    STATE_BOUND_KEY,
     LearningConfig,
     PopulationConfig,
 )
@@ -24,12 +26,14 @@ from .agent_contracts import (
     ForgettingFactorOutsideItsRange,
     Lineage,
     PopulationSnapshot,
+    StartingStateOutsideItsBound,
 )
 from .agent_genes import (
     ENTRY_THRESHOLD,
     FLAT,
     FORGETTING_FACTOR,
     STORAGE_DTYPE,
+    WEIGHT_PREFIX,
     _gene_layout,
 )
 
@@ -54,6 +58,9 @@ class _ConstructionMixin(_PopulationStateFields):
                 a feature it carries no weight for or carries no entry gene, if
                 an outcome history is longer than the ceiling it is restored
                 under, or if that ceiling retains nothing.
+            ValueError: Also if a reading awaiting its outcome is carried into
+                a population that does not learn, or does not name exactly the
+                living agents at the population's feature width.
             ForgettingFactorOutsideItsRange: If the population learns and some
                 genome carries a forgetting factor the configuration disallows.
             KeyError: If the population learns and the agents were not born
@@ -115,10 +122,12 @@ class _ConstructionMixin(_PopulationStateFields):
         self.learning = snapshot.learning
         self._update: online.OnlineUpdate | None = None
         self._forgetting_at: int | None = None
-        self._shown: tuple[UtcTimestamp, np.ndarray] | None = None
-        self._bounds_reached: list[BoundReached] = []
+        self._bounds_reached: list[BoundReached] = list(snapshot.bounds_reached)
         if self.learning is not None:
             self._start_learning(self.learning)
+        self._shown: tuple[UtcTimestamp, np.ndarray] | None = self._resume_pending(
+            snapshot.pending
+        )
 
     def _start_learning(self, configured: LearningConfig) -> None:
         """Bind the update to its columns and refuse a rate nobody declared."""
@@ -170,25 +179,40 @@ class _ConstructionMixin(_PopulationStateFields):
                 carries.
             learning: What the online update is turned by, or ``None`` for a
                 population that does not learn. When it is given, every agent
-                additionally starts out carrying the update's own columns at
-                the declared cold start, because what an estimator holds is
-                declared by the configuration that declares the estimator.
+                carries exactly the update's own columns. A birth carrying no
+                learned state starts them from its own genome's ``weight.``
+                genes — its prior; a birth carrying all of them starts from
+                exactly what it carried, and its own ``weight.`` genes are not
+                read.
+
+        A birth carrying nothing is founded with the family's largest gain. If
+        the declared state bound is below that gain, the gain is held at
+        founding: the evidence starts at the least value the bound admits, the
+        prior is seeded against that evidence so the starting weight is still
+        the gene exactly, and the hold is recorded in :meth:`bounds_reached`
+        before any decision point is answered. A birth carrying learned state
+        is admitted verbatim and never held.
 
         Returns:
             PopulationState: The population, before any decision point.
+
+        Raises:
+            ValueError: If a learning birth carries part of the update's
+                columns, or a name the update does not declare.
+            StartingStateOutsideItsBound: If a learning agent would start with
+                a learned weight that is not finite, or a weight vector whose
+                norm exceeds the declared weight-norm bound, or if an inherited
+                state carries a gain outside the declared state bound.
         """
         held = PopulationConfig() if population is None else population
-        started: Mapping[str, float] = {}
-        if learning is not None and births:
-            _, features = _gene_layout(births[0].genome)
-            started = online.cold_start(features, learning)
-        return cls(
+        starts = tuple(_starting_state(birth, learning) for birth in births)
+        founded = cls(
             PopulationSnapshot(
                 agents=tuple(
                     AgentSnapshot(
                         agent_id=birth.agent_id,
                         genome=birth.genome,
-                        learned_state={**birth.learned_state, **started},
+                        learned_state=start.learned_state,
                         intended=FLAT,
                         realised=FLAT,
                         history=(),
@@ -197,11 +221,55 @@ class _ConstructionMixin(_PopulationStateFields):
                         feature_schema_version=birth.feature_schema_version,
                         model_version=birth.model_version,
                     )
-                    for birth in births
+                    for birth, start in zip(births, starts, strict=True)
                 ),
                 history_capacity=held.history_capacity,
                 learning=learning,
+                bounds_reached=tuple(
+                    BoundReached(
+                        agent_id=birth.agent_id,
+                        as_of=birth.born_at,
+                        bound=STATE_BOUND_KEY,
+                        at_founding=True,
+                    )
+                    for birth, start in zip(births, starts, strict=True)
+                    if start.held_at_founding
+                ),
             )
+        )
+        founded._refuse_a_start_outside_the_bound(
+            np.asarray([start.carried for start in starts], dtype=np.bool_)
+        )
+        return founded
+
+    def _refuse_a_start_outside_the_bound(self, carried: np.ndarray) -> None:
+        """Refuse agents whose starting state their bounds would not admit.
+
+        Applied at a birth and not at a restore: a restored agent resumes a
+        state the bound already held, and a restore never re-reads a prior.
+        ``carried`` marks the births that inherited a learned state, whose gain
+        is checked as well as their weights.
+        """
+        if self._update is None:
+            return
+        unfit = self._update.unfit_to_start(self._learned, carried)
+        if not unfit.any():
+            return
+        weight_norms = self._update.weight_norms(self._learned).tolist()
+        gain_norms = self._update.state_norms(self._learned).tolist()
+        strangers = {
+            agent_id: {"weight_norm": weight, "gain_norm": gain}
+            for agent_id, weight, gain, out in zip(
+                self._ids, weight_norms, gain_norms, unfit.tolist(), strict=True
+            )
+            if out
+        }
+        assert self.learning is not None
+        raise StartingStateOutsideItsBound(
+            f"agents would start with learned weights outside the declared "
+            f"weight-norm bound {self.learning.weight_norm_bound}, or not "
+            f"finite, or with an inherited gain outside the declared state "
+            f"bound {self.learning.state_bound}; starting norms {strangers}"
         )
 
     @classmethod
@@ -219,3 +287,61 @@ class _ConstructionMixin(_PopulationStateFields):
             PopulationState: The same population, mid-walk.
         """
         return cls(snapshot)
+
+
+@dataclass(frozen=True)
+class _Start:
+    """What one birth starts from, and how it came to start there.
+
+    Attributes:
+        learned_state: The learned columns the agent is admitted with.
+        carried: Whether they were inherited rather than built from a prior.
+        held_at_founding: Whether the state bound acted on the founding gain.
+    """
+
+    learned_state: Mapping[str, float]
+    carried: bool
+    held_at_founding: bool
+
+
+def _starting_state(birth: AgentBirth, learning: LearningConfig | None) -> _Start:
+    """What ``birth`` starts out having learned, all or nothing.
+
+    Without an update, what the birth declares is what it carries. With one, a
+    birth carries either nothing — and starts from its own genome's
+    ``weight.`` genes as its prior, at the founding evidence the state bound
+    admits — or exactly the columns the update declares, admitted verbatim
+    with no prior applied and no hold. A part of that set is
+    refused, because a weight carried without the accumulator it is computed
+    from is a state no update could resume; so is a name the update does not
+    declare, because a column nothing chose would be silently grown rather
+    than refused.
+
+    Raises:
+        ValueError: If the birth carries some but not all of the update's
+            columns, or any name the update does not declare.
+    """
+    if learning is None:
+        return _Start(birth.learned_state, carried=True, held_at_founding=False)
+    _, features = _gene_layout(birth.genome)
+    if not birth.learned_state:
+        genes = birth.genome.genes
+        energy, held = online.founding_energy(learning, features)
+        return _Start(
+            online.cold_start(
+                {name: genes[f"{WEIGHT_PREFIX}{name}"] for name in features},
+                learning,
+                energy,
+            ),
+            carried=False,
+            held_at_founding=held,
+        )
+    declared = set(online.declared_columns(features))
+    carried = set(birth.learned_state)
+    if carried != declared:
+        raise ValueError(
+            f"{birth.agent_id!r} is born carrying learned state that is neither "
+            "nothing nor the whole of what the update declares: missing "
+            f"{sorted(declared - carried)}, undeclared {sorted(carried - declared)}"
+        )
+    return _Start(birth.learned_state, carried=True, held_at_founding=False)

@@ -64,7 +64,6 @@ def test_the_declared_losses_and_bounds_are_keys_of_the_run() -> None:
     declared = dataclasses.asdict(EcologyConfig(run_id="named"))
     assert declared["population"]["history_capacity"] == DEFAULT_HISTORY_CAPACITY
     assert set(declared["learning"]) == {
-        "cold_start_weight",
         "forgetting_minimum",
         "forgetting_maximum",
         "state_bound",

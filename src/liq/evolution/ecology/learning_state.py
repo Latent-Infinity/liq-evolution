@@ -20,10 +20,10 @@ ESTIMATOR_FAMILY = "ftrl_proximal"
 MEASURED_SECONDS_PER_AGENT_PER_BAR = 8.6e-07
 
 #: Learned-state name: the weight the update has arrived at for one feature.
-#: Distinct from the genome's ``weight.`` genes, and deliberately so — the
-#: heritable weight and the learned one are different quantities with different
-#: lifetimes, and the inheritance arm turns on being able to carry one without
-#: the other.
+#: Distinct from the genome's ``weight.`` genes, and deliberately so — the gene
+#: is the prior this weight starts from at a birth that inherits no learned
+#: state, and the two have different lifetimes: the inheritance arm turns on
+#: being able to carry one across a birth without the other.
 WEIGHT_PREFIX = "learned.weight."
 
 #: Learned-state name: the forgetting-weighted accumulated adjusted gradient.
@@ -75,21 +75,40 @@ def declared_columns(features: Sequence[str]) -> tuple[str, ...]:
     )
 
 
-def cold_start(features: Sequence[str], config: LearningConfig) -> Mapping[str, float]:
-    """What every column above holds before the agent has been shown anything.
+def cold_start(
+    priors: Mapping[str, float],
+    config: LearningConfig,
+    energy: Mapping[str, float] | None = None,
+) -> Mapping[str, float]:
+    """What every column above holds before one agent has been shown anything.
 
-    The declared cold-start weight is seeded into the accumulator the weight is
-    computed *from*, not only into the weight, so it is the starting point of
-    the recursion rather than a value the first observation silently discards.
+    The starting weight is per agent and per feature: ``priors`` maps each
+    feature, in the population's feature order, to the value that agent's own
+    genome declares for it in its ``weight.`` gene. There is no second source
+    of a starting weight, so two agents start apart exactly when their genes
+    say so.
+
+    Each prior is seeded into the accumulator the weight is computed *from*,
+    not only into the weight, so it is the starting point of the recursion
+    rather than a value the first observation silently discards. The seed is
+    taken against the evidence the agent starts with, so the weight that
+    accumulator implies is the prior exactly and stays the prior until
+    something moves it. The standardiser's moments start at zero whatever the
+    prior, because an agent that has been shown nothing has seen nothing. The
+    evidence starts at ``energy``, which is zero unless the declared state
+    bound sits below the family's founding gain. In that case it is the least
+    the bound admits: see
+    :func:`~liq.evolution.ecology.learning_update.founding_energy`.
     """
-    seed = -config.cold_start_weight * (
-        config.step_offset / config.step_scale + config.squared_penalty
-    )
     values: dict[str, float] = {SCALE_MASS: 0.0}
-    for name in features:
-        values[f"{WEIGHT_PREFIX}{name}"] = config.cold_start_weight
-        values[f"{DRIFT_PREFIX}{name}"] = seed
-        values[f"{ENERGY_PREFIX}{name}"] = 0.0
+    for name, prior in priors.items():
+        evidence = 0.0 if energy is None else energy[name]
+        step = (
+            config.step_offset + np.sqrt(evidence)
+        ) / config.step_scale + config.squared_penalty
+        values[f"{WEIGHT_PREFIX}{name}"] = prior
+        values[f"{DRIFT_PREFIX}{name}"] = -prior * float(step)
+        values[f"{ENERGY_PREFIX}{name}"] = evidence
         values[f"{SCALE_TOTAL_PREFIX}{name}"] = 0.0
         values[f"{SCALE_SQUARES_PREFIX}{name}"] = 0.0
     return values

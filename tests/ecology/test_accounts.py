@@ -471,7 +471,7 @@ def test_the_shipped_agent_runs_end_to_end_against_both_ports() -> None:
     nothing in between is wired only to a stand-in.
 
     The loop is now a circle rather than a line, and the last assertion is the
-    one that closes it: the agent starts at its declared cold start, the
+    one that closes it: the agent starts at its own zero prior, the
     account tells it what each reading earned, the weights it reads move
     because of that, and what it then wants reaches the model. An account that
     asked for wishes and never settled them would pass everything above this
@@ -480,7 +480,7 @@ def test_the_shipped_agent_runs_end_to_end_against_both_ports() -> None:
     genome = Genome(
         genes={
             f"{MASK_PREFIX}{LEVEL}": 1.0,
-            f"{WEIGHT_PREFIX}{LEVEL}": 1.0,
+            f"{WEIGHT_PREFIX}{LEVEL}": 0.0,
             ENTRY_THRESHOLD: 0.0,
             FORGETTING_FACTOR: FORGETS_AT,
         },

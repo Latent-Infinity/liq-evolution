@@ -16,6 +16,7 @@ from liq.evolution.ecology.types import (
 )
 
 from .agent_contracts import (
+    FeatureNotFinite,
     NothingWasShown,
     PopulationDoesNotLearn,
     PopulationStep,
@@ -59,6 +60,8 @@ class _DecisionsMixin(_PopulationStateFields):
                 and therefore no learned weight for the rule to read.
             AgentBornUnderAnotherVocabulary: If the decision point's feature
                 vocabulary is not the one every living agent was born under.
+            FeatureNotFinite: If any value the view offers is not a finite
+                number. Nothing moves: no moment, no reading, no wish.
         """
         self._refuse_if_nothing_learns()
         assert self._update is not None
@@ -79,11 +82,20 @@ class _DecisionsMixin(_PopulationStateFields):
             dtype=STORAGE_DTYPE,
             count=self._features,
         )
+        if not np.isfinite(values).all():
+            raise FeatureNotFinite(
+                f"the view at {window.as_of.isoformat()} offered feature values "
+                "that are not finite numbers: "
+                f"{self._not_finite_features(values)}; folded in, one would "
+                "turn that feature's scale and every weight the next outcome "
+                "reached into not-a-number for good, so the decision point is "
+                "refused and nothing is put in its place"
+            )
         offered = np.asarray(readable, dtype=np.bool_)
-        standardised = self._show(window.as_of, values)
         switched_on = self._genes[:, : self._features] >= SWITCHED_ON_AT
+        consumed = self._show(window.as_of, values, switched_on & offered)
         learned = self._update.weights(self._learned)
-        reading = np.einsum("af,af->a", switched_on * offered * learned, standardised)
+        reading = np.einsum("af,af->a", learned, consumed)
         wanted = np.where(reading > self._genes[:, self._entry_at], FULL_EXPOSURE, FLAT)
         held = tuple(self._realised.tolist())
         self._intended[:] = wanted
@@ -95,30 +107,48 @@ class _DecisionsMixin(_PopulationStateFields):
             held=held,
         )
 
-    def _show(self, as_of: UtcTimestamp, values: np.ndarray) -> np.ndarray:
+    def _not_finite_features(self, values: np.ndarray) -> dict[str, float]:
+        """Which offered features are not finite numbers, and what each was."""
+        return {
+            name: float(value)
+            for name, value in zip(self.feature_names, values.tolist(), strict=True)
+            if not np.isfinite(value)
+        }
+
+    def _show(
+        self, as_of: UtcTimestamp, values: np.ndarray, consulted: np.ndarray
+    ) -> np.ndarray:
         """Scale what the wish and the update both consume, and put it aside.
 
         Nothing is learned here. The reading is scaled by each agent's own
-        prior-bar statistics and put aside with the instant it belongs to, so
-        that when the outcome arrives it can be paired with the reading that
-        produced it rather than with whatever is in front of the population by
-        then. The same scaled reading is handed back, because the wish is
-        formed from it: one standardisation, consumed twice, so the value a
-        decision was taken on and the value an outcome is attributed to cannot
-        be two different numbers.
+        prior-bar statistics, and each feature the agent does not consult is
+        zeroed. ``consulted`` is switched on by the genome *and* offered by the
+        view, computed once by the caller. What is left is put aside with the
+        instant it belongs to, so that when the outcome arrives it can be paired
+        with the reading that produced it rather than with whatever is in front
+        of the population by then. The same reading is handed back, because the
+        wish is formed from it: one standardisation and one mask, consumed
+        twice. So the value a decision was taken on and the value an outcome is
+        attributed to cannot be two different numbers. A feature switched off
+        or withheld therefore gives the update no prediction error and no
+        gradient, and a withheld feature's standardised raw zero, which nobody
+        broadcast, is never learned from.
         """
         assert self._update is not None
         raw = np.broadcast_to(values, (len(self._ids), self._features))
         standardised = self._update.standardise(self._learned, raw, self._forgetting())
-        self._shown = (as_of, standardised)
-        return standardised
+        consumed = standardised * consulted
+        self._shown = (as_of, consumed)
+        return consumed
 
     def standardised(self, agent_id: AgentId) -> tuple[float, ...]:
         """Return what the update would consume for ``agent_id``, in feature order.
 
         The scaled reading, not the raw one: this is the value the estimator
         actually sees, which is the thing a causality claim has to be made
-        about. Available only between a decision point and the outcome that
+        about. A feature the agent's genome switches off, or that the view
+        withheld, reads as exactly zero here, because it is exactly zero to the
+        decision and to the update. Available only between a decision point and the outcome that
         follows it, because outside that pair there is nothing it would be a
         reading of.
 

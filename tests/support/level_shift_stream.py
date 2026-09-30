@@ -53,6 +53,7 @@ from types import MappingProxyType
 from liq.evolution.ecology import Genome, agent
 from liq.evolution.ecology.adapters import NullBarSource
 from liq.evolution.ecology.types import AgentId, BarWindow, InstrumentId
+from tests.support import state_norm_probe
 
 #: How many decision points the stream covers. Chosen so that the span after
 #: the break is comparable with the 389 scorable bars DATA-E01.pcar offers after
@@ -83,6 +84,12 @@ FEATURE = "cycle"
 #: of the reading and a check can reconstruct one without quoting a number the
 #: genome does not carry.
 ENTRY_AT = 0.0
+
+#: The prior every agent here starts its learned weight from — its
+#: ``weight.`` gene — unless a check names another. Zero, so the evidence built
+#: on this stream is about the forgetting gene alone and an agent that has been
+#: shown nothing carries nothing.
+PRIOR_AT = 0.0
 
 #: Vocabularies everything here is stamped with. Named so nothing built from
 #: this stream can be mistaken for something built from the ramp's own feature
@@ -139,11 +146,13 @@ def windows(count: int = DECISION_POINTS) -> tuple[BarWindow, ...]:
     )
 
 
-def birth(agent_id: AgentId, *, forgetting: float) -> agent.AgentBirth:
-    """One agent that differs from the other only in how fast it forgets.
+def birth(
+    agent_id: AgentId, *, forgetting: float, prior: float = PRIOR_AT
+) -> agent.AgentBirth:
+    """One agent that differs from the other only in the genes it is handed.
 
-    Every other gene is identical, which is what makes the comparison a
-    comparison of the forgetting gene rather than of two agents.
+    Every other gene is identical, which is what makes a comparison a
+    comparison of the gene that was varied rather than of two agents.
     """
     return agent.AgentBirth(
         agent_id=agent_id,
@@ -151,7 +160,7 @@ def birth(agent_id: AgentId, *, forgetting: float) -> agent.AgentBirth:
             genes=MappingProxyType(
                 {
                     f"{agent.MASK_PREFIX}{FEATURE}": 1.0,
-                    f"{agent.WEIGHT_PREFIX}{FEATURE}": 1.0,
+                    f"{agent.WEIGHT_PREFIX}{FEATURE}": prior,
                     agent.ENTRY_THRESHOLD: ENTRY_AT,
                     agent.FORGETTING_FACTOR: forgetting,
                 }
@@ -191,7 +200,8 @@ class Trajectory:
             decision point — the feature after the agent's own online
             standardisation.
         state_norms: The size of the estimator's internal state at each
-            decision point.
+            decision point, recomputed from the accumulators the next update
+            starts from rather than read off what the population reports.
         weight_norms: The size of the learned weight vector at each decision
             point.
     """
@@ -247,8 +257,11 @@ def walk(
         )
         for agent_id in ids:
             learned[agent_id].append(state.learned_weights(agent_id)[FEATURE])
-            estimator = state.estimator_state(agent_id)
-            state_norms[agent_id].append(_norm(estimator.values()))
+            # From the stored accumulators, not the reporting accessor: see
+            # `state_norm_probe.gain_from_accumulators` for why.
+            state_norms[agent_id].append(
+                _norm(state_norm_probe.gain_from_accumulators(state, agent_id))
+            )
             weight_norms[agent_id].append(
                 _norm(state.learned_weights(agent_id).values())
             )

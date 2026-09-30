@@ -8,7 +8,13 @@ from liq.evolution.ecology.types import Genome
 
 MASK_PREFIX = "mask."
 
-#: Gene name prefix: how much one feature counts once it is read.
+#: Gene name prefix: the prior for one feature — the value that agent's learned
+#: weight for the feature starts from when it is born without an inherited
+#: learned state. In the learned weight's own units: outcome per standard
+#: deviation of the feature's standardised view. The decision never reads the
+#: gene; it reads the learned weight, which the update moves away from the prior
+#: at the agent's own forgetting rate. An agent born carrying inherited learned
+#: state starts from that instead, and its own ``weight.`` genes are not read.
 WEIGHT_PREFIX = "weight."
 
 #: Gene name: the sum a reading must be strictly above before the agent wants
@@ -16,10 +22,11 @@ WEIGHT_PREFIX = "weight."
 ENTRY_THRESHOLD = "entry_threshold"
 
 #: Gene name: how fast an agent discards what it learned from older bars. Read
-#: by the online update and by nothing else — the wish above is formed from the
-#: mask, weight and entry genes alone — but carried in the genome because it is
+#: by the online update and by nothing else — the wish is formed from the mask
+#: and entry genes and the learned weights, and this gene reaches it only
+#: through how those weights move — but carried in the genome because it is
 #: inherited, which is the whole of what makes one agent adapt faster than
-#: another.
+#: another. It also sets how long a prior outlives the evidence against it.
 FORGETTING_FACTOR = "forgetting_factor"
 
 #: A mask gene at or above this switches its feature on. Genes are numbers, so
@@ -61,7 +68,8 @@ def _gene_layout(genome: Genome) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if missing:
         raise ValueError(
             f"the population's genomes switch on features they carry no weight "
-            f"for: {missing}; how much a feature counts is inherited, never "
+            f"gene for: {missing}; that gene is the prior an agent's learned "
+            "weight for the feature starts from, and it is inherited, never "
             "defaulted"
         )
     if ENTRY_THRESHOLD not in genome.genes:

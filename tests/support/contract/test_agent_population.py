@@ -59,10 +59,7 @@ def an_array_genome_population() -> ArrayGenomePopulation:
                             f"{MASK_PREFIX}{name}": float(position <= index)
                             for position, name in enumerate(ARRAY_FEATURES)
                         },
-                        **{
-                            f"{WEIGHT_PREFIX}{name}": index / span
-                            for name in ARRAY_FEATURES
-                        },
+                        **{f"{WEIGHT_PREFIX}{name}": 0.0 for name in ARRAY_FEATURES},
                         ENTRY_THRESHOLD: 1.0 - index / span,
                     }
                 ),

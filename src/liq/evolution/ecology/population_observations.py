@@ -20,6 +20,7 @@ from .agent_contracts import (
     BoundReached,
     NothingWasShown,
     OutcomeFromTheSameBar,
+    OutcomeNotFinite,
 )
 from .agent_genes import (
     STORAGE_DTYPE,
@@ -55,6 +56,8 @@ class _ObservationsMixin(_PopulationStateFields):
             NothingWasShown: If no decision point has been answered yet.
             OutcomeFromTheSameBar: If ``as_of`` is not after that decision
                 point.
+            OutcomeNotFinite: If any outcome is not a finite number. Nothing
+                is learned from the rest, and the reading stays paired.
             KeyError: If an outcome names an agent that is not alive, or if a
                 living agent was left out.
         """
@@ -85,11 +88,26 @@ class _ObservationsMixin(_PopulationStateFields):
             dtype=STORAGE_DTYPE,
             count=len(self._ids),
         )
+        if not np.isfinite(realised).all():
+            raise OutcomeNotFinite(
+                "outcomes that are not finite numbers were offered for "
+                f"{self._not_finite(realised)}; one would turn every weight and "
+                "gain it reached into not-a-number for good, so the whole "
+                "observation is refused and nothing is put in its place"
+            )
         applied = self._update.observe(
             self._learned, standardised, realised, self._forgetting()
         )
         self._shown = None
         return self._record(as_of, applied)
+
+    def _not_finite(self, realised: np.ndarray) -> dict[AgentId, float]:
+        """Who was offered an outcome that is not a finite number, and what it was."""
+        return {
+            agent_id: float(value)
+            for agent_id, value in zip(self._ids, realised.tolist(), strict=True)
+            if not np.isfinite(value)
+        }
 
     def bounds_reached(self) -> tuple[BoundReached, ...]:
         """Return every declared bound that acted, in the order it acted."""
