@@ -16,7 +16,8 @@ which adapter is used is decided where the run is assembled, never here.
 
 :mod:`liq.evolution.ecology.accounts`, :mod:`liq.evolution.ecology.agent`,
 :mod:`liq.evolution.ecology.config`, :mod:`liq.evolution.ecology.driver`,
-:mod:`liq.evolution.ecology.substrate`, :mod:`liq.evolution.ecology.features`
+:mod:`liq.evolution.ecology.learning`, :mod:`liq.evolution.ecology.substrate`,
+:mod:`liq.evolution.ecology.features`
 and :mod:`liq.evolution.ecology.errors`
 are reached as attributes of this package rather than re-exported name by name. The boundary ``__all__`` names is
 the ports and the values that cross them, and it is asserted to be exactly that;
@@ -31,6 +32,7 @@ from liq.evolution.ecology import (  # noqa: F401
     driver,
     errors,
     features,
+    learning,
     substrate,
 )
 from liq.evolution.ecology.ports import (

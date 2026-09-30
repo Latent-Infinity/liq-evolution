@@ -13,8 +13,14 @@ against before a provider-backed adapter exists.
 :mod:`liq.evolution.ecology.adapters.liq_sim` is the first that is not a
 stand-in: it satisfies the execution port through the platform's execution
 simulator, and it is the only module in this library that imports it.
+
+:mod:`liq.evolution.ecology.adapters.array_genome` satisfies the population port
+over the ecology's own array-genome store. It is the only module in this library
+permitted to reach the evolution engine's selection, variation and archive
+primitives, so a second importer of those would be a second engine.
 """
 
+from liq.evolution.ecology.adapters.array_genome import ArrayGenomePopulation
 from liq.evolution.ecology.adapters.liq_sim import LiqSimExecutionAdapter
 from liq.evolution.ecology.adapters.null import (
     NullAgentPopulation,
@@ -25,6 +31,7 @@ from liq.evolution.ecology.adapters.null import (
 )
 
 __all__ = [
+    "ArrayGenomePopulation",
     "LiqSimExecutionAdapter",
     "NullAgentPopulation",
     "NullBarSource",

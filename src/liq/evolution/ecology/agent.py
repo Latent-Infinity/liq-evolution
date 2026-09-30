@@ -1,13 +1,37 @@
-"""One agent's heritable rule for turning what it was shown into what it wants.
+"""What an agent has inherited and what it has learned, turned into what it wants.
 
-**The contract, in full.** At a decision point an agent reads the features its
-genome switches on and the view actually offers, multiplies each by that
-feature's weight gene, adds them, and wants the whole of its evaluation account
-long in the instrument if that sum is strictly above its entry gene. Otherwise
-it wants to be flat. The wish is stamped at the decision point's own instant.
-That is the entire rule, and it is written here rather than in a comment beside
-the code because a rebuild that changed it should have to change this paragraph
-first.
+**The contract, in full.** At a decision point an agent standardises the
+features the view offers against its own prior-bar statistics, multiplies each
+feature its genome switches on by *the weight it has learned for that feature*,
+adds them, and wants the whole of its evaluation account long in the instrument
+if that sum is strictly above its entry gene. Otherwise it wants to be flat. The
+wish is stamped at the decision point's own instant. That is the entire rule,
+and it is written here rather than in a comment beside the code because a
+rebuild that changed it should have to change this paragraph first.
+
+**Which weight the rule reads, and why it is the learned one.** The genome
+carries a ``weight.`` gene per feature and the online update carries a
+``learned.weight.`` column per feature, and they are different quantities: the
+gene multiplies raw feature levels, the learned weight is fitted against the
+standardised view to predict what holding a reading earned. The decision reads
+the learned one. That is a ruling rather than a preference
+(`liq-docs/plans/oracle-learned-weights-in-the-decision-2026-09-27.md`), and the
+reason is the experiment: the arm this platform exists to run is *which of the
+genome and the learned state crosses a birth boundary*, and a rule that read
+only genes would make the learned half consequence-free — an agent that learns
+and cannot act. What the genome's per-feature weight is for now, if anything, is
+open and is settled by ablation before the genome schema freezes; until then it
+is inherited, handed back, and not read here.
+
+**Why the reading is standardised before it is weighted.** The learned weights
+are fitted against standardised inputs, so multiplying them by raw levels would
+be arithmetically incoherent — the two live in different units. Standardising
+first is therefore forced, and it is causal: each feature is scaled by
+statistics accumulated from bars strictly *before* the one being processed, and
+the bar joins those statistics only afterwards. The ordering was an internal
+detail of the update while nothing read what it produced; it now decides every
+wish, which is why the check that pins it asserts on the wish and not only on
+the number.
 
 **Why the wish is all-or-nothing.** An intent is a wish, not an order, and
 deciding *how much* of a wish is warranted belongs to two places that are not
@@ -25,130 +49,164 @@ have. Treating it as zero and treating it as an error are both defensible; what
 is not defensible is reaching for it, and nothing here can, because only the
 names the view offers are ever read.
 
-**What is deliberately absent.** Nothing here learns, so the same genome and the
-same view give the same wish forever. Nothing here knows about other agents, so
-there is no allocation. Nothing here knows about the account, costs or the
-mandate, so there is no sizing. This is one agent's genome and one rule; the
-struct-of-arrays layout a whole population needs is a different shape and
-arrives with the population.
+Once the reading is standardised, "contributes nothing" stops being free and has
+to be arranged. A withheld value enters the arithmetic as a raw zero, and a raw
+zero standardises to wherever zero sits among the bars behind it — which is a
+perfectly definite, perfectly wrong opinion about a value nobody has. So what
+the view offers is carried alongside the mask and multiplied into the reading:
+a feature nobody broadcast contributes exactly nothing, whatever the agent has
+learned about it and whatever the statistics behind it say. *Known narrowness,
+recorded rather than papered over:* the withheld zero is still folded into that
+feature's own forgetting-weighted moments, because the standardiser's mass is
+one column shared by every feature and separating it is a change to what an
+agent's learned state **is**. So an agent's scale for a late-arriving feature
+carries a decaying memory of the bars it was absent for. That biases a scale; it
+cannot reach the wish through a feature the view is withholding, and it belongs
+with the learned-state schema question rather than with this wiring.
+
+**Why a population that does not learn cannot be stepped.** The rule above reads
+a learned weight, so a population built with no online update has nothing to
+read: it has no weight columns, no rate to write them at, and no statistics to
+standardise against. Such a population is still constructible, because holding
+agents and stepping them are different capabilities and a snapshot of the first
+is worth taking. Asking it for a wish is refused rather than answered from a
+fallback, because a fallback would be a second decision rule that nobody
+declared and that no fact describes.
+
+**The population is the rule; one agent is a view onto it.**
+:class:`PopulationState` is a handful of arrays: one for the genes, one for what
+each agent has learned, one for what each wants, one for what each holds, one
+for what each has seen. A decision point is answered for everyone at once, by
+arithmetic over those arrays rather than by a loop over objects, because ten
+thousand agents reading sixty-four features is a matrix the machine already
+knows how to multiply and is ten thousand attribute lookups it does not.
+:class:`Agent` is not a second implementation of that arithmetic — it is a
+population of one, addressed by name, for the evaluation account that follows a
+single agent. There was a second implementation, and it was deleted rather than
+kept in step: two forms of one rule agree until floating-point addition is
+performed in two orders, and then a wish sitting exactly on its entry gene falls
+either side of it depending on which form asked.
+
+**Why the parts are named rather than bundled.** An agent's parts have different
+lifetimes and different owners. What it inherited does not change while it
+lives; what it learned changes every bar; what it wants is remade at every
+decision point; what it holds is whatever actually traded; where it came from
+and what vocabulary it was born under never change at all. The experiment this
+platform exists to run turns on *which* of those a birth carries across, and a
+representation that held them as one state object could not express the
+question, let alone answer it. So each is reachable, and writable, on its own.
+
+**Why a snapshot carries the heritable part too.** The wording that matters is
+"restore": what comes back has to be able to go on deciding, and a bundle of
+mutable parts with no genes decides nothing. A snapshot here is therefore the
+whole of an agent, marked by which parts a resume would change and which it
+would not, and restoring one builds a population that stands on its own rather
+than one that needs the population it came from to still exist.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-
-from liq.evolution.ecology.types import (
-    AgentId,
-    BarWindow,
-    Genome,
-    InstrumentId,
-    Intent,
+from .agent_contracts import (
+    AgentBirth,
+    AgentBornUnderAnotherVocabulary,
+    AgentSnapshot,
+    AgentVersions,
+    BoundReached,
+    ForgettingFactorOutsideItsRange,
+    Lineage,
+    NothingWasShown,
+    OutcomeFromTheSameBar,
+    PopulationDoesNotLearn,
+    PopulationSnapshot,
+    PopulationStep,
+    StorageReport,
 )
+from .agent_facade import Agent
+from .agent_genes import (
+    ENTRY_THRESHOLD,
+    FORGETTING_FACTOR,
+    FULL_EXPOSURE,
+    MASK_PREFIX,
+    STORAGE_DTYPE,
+    SWITCHED_ON_AT,
+    WEIGHT_PREFIX,
+)
+from .population_access import _AccessMixin
+from .population_construction import _ConstructionMixin
+from .population_decisions import _DecisionsMixin
+from .population_observations import _ObservationsMixin
+from .population_snapshot import _SnapshotMixin
 
 __all__ = [
     "ENTRY_THRESHOLD",
+    "FORGETTING_FACTOR",
     "FULL_EXPOSURE",
     "MASK_PREFIX",
+    "STORAGE_DTYPE",
     "SWITCHED_ON_AT",
     "WEIGHT_PREFIX",
     "Agent",
+    "AgentBirth",
+    "AgentBornUnderAnotherVocabulary",
+    "AgentSnapshot",
+    "AgentVersions",
+    "BoundReached",
+    "ForgettingFactorOutsideItsRange",
+    "Lineage",
+    "NothingWasShown",
+    "OutcomeFromTheSameBar",
+    "PopulationDoesNotLearn",
+    "PopulationSnapshot",
+    "PopulationState",
+    "PopulationStep",
+    "StorageReport",
 ]
 
-#: Gene name prefix: whether one feature is read at all. Prefixed rather than
-#: positional so a reader asks for the trait it means, and so a genome carrying
-#: genes for features this run does not compute is not silently misaligned.
-MASK_PREFIX = "mask."
 
-#: Gene name prefix: how much one feature counts once it is read.
-WEIGHT_PREFIX = "weight."
+class PopulationState(
+    _ConstructionMixin,
+    _AccessMixin,
+    _DecisionsMixin,
+    _ObservationsMixin,
+    _SnapshotMixin,
+):
+    """Every living agent, held as arrays, with each part addressable on its own.
 
-#: Gene name: the sum a reading must be strictly above before the agent wants
-#: exposure at all.
-ENTRY_THRESHOLD = "entry_threshold"
+    A population comes into being in one of two ways and there is no third:
+    :meth:`founded`, from a set of births, which is how a run starts; and
+    :meth:`restored`, from a snapshot, which is how a run resumes. Both go
+    through the same construction, so a restored population cannot be a
+    differently-shaped thing that happens to answer the same questions.
 
-#: A mask gene at or above this switches its feature on. Genes are numbers, so
-#: the cut has to be written down somewhere; here, once.
-SWITCHED_ON_AT = 0.5
-
-#: What an agent wants when it wants anything: the whole of its own evaluation
-#: account, long. See the module docstring for why there is nothing between this
-#: and flat.
-FULL_EXPOSURE = 1.0
-
-#: What it wants otherwise.
-FLAT = 0.0
+    The gene columns are laid out so that stepping reads slices rather than
+    gathers: every ``mask.`` gene first, in feature order, then every
+    ``weight.`` gene in the same order, then whatever else the vocabulary
+    carries. A gene the step does not read — a forgetting factor, say — is still
+    held, still inherited and still handed back by :meth:`genome`; it simply is
+    not one of the two blocks the arithmetic slices.
 
 
-@dataclass(frozen=True)
-class Agent:
-    """One agent: an identity and the heritable rule it forms wishes by.
-
-    Attributes:
-        agent_id: Who formed the wish. Carried into every intent, so an exposure
-            can be traced back to the agent that wanted it rather than to a
-            position in a list.
-        genome: The heritable part. It does not change during the agent's life;
-            whatever the agent learns is held separately, because inheritance
-            has to be able to carry one without the other.
     """
 
-    agent_id: AgentId
-    genome: Genome
+    pass
 
-    def intend(self, window: BarWindow, instrument: InstrumentId) -> Intent:
-        """Form what this agent wants to hold in ``instrument`` at ``window``.
 
-        The decision point is handed over whole rather than unpacked by the
-        caller, so the wish's instant is the decision point's instant by
-        construction. A caller passing the two apart could stamp a wish later
-        than the reading it was formed from, which is the cheapest look-ahead
-        there is.
-
-        Args:
-            window: The decision point, carrying the broadcast view.
-            instrument: The instrument the wish is formed in.
-
-        Returns:
-            Intent: What the agent wants to hold, stamped at ``window.as_of``.
-
-        Raises:
-            KeyError: If the genome carries no entry gene, or switches on a
-                feature it carries no weight for. A genome that cannot be read
-                is a defect in whatever produced it, not a condition to handle:
-                treating either as a default would score an agent on a rule
-                nobody wrote down.
-        """
-        reading = self._read(window.features.get(instrument, {}))
-        wanted = FULL_EXPOSURE if reading > self._entry_gene() else FLAT
-        return Intent(
-            agent_id=self.agent_id,
-            instrument=instrument,
-            target_exposure=wanted,
-            as_of=window.as_of,
-        )
-
-    def _entry_gene(self) -> float:
-        """The sum a reading must be strictly above before exposure is wanted."""
-        if ENTRY_THRESHOLD not in self.genome.genes:
-            raise KeyError(
-                f"the genome carries no {ENTRY_THRESHOLD!r} gene, so there is no "
-                "reading at which this agent would want exposure and none at which "
-                "it would not"
-            )
-        return self.genome.genes[ENTRY_THRESHOLD]
-
-    def _read(self, view: Mapping[str, float]) -> float:
-        """Sum the features this genome switches on and this view offers."""
-        total = 0.0
-        for name in view:
-            if self.genome.genes.get(f"{MASK_PREFIX}{name}", FLAT) < SWITCHED_ON_AT:
-                continue
-            weight = f"{WEIGHT_PREFIX}{name}"
-            if weight not in self.genome.genes:
-                raise KeyError(
-                    f"the genome switches {name!r} on and carries no {weight!r} "
-                    "gene; how much a feature counts is inherited, never defaulted"
-                )
-            total += self.genome.genes[weight] * view[name]
-        return total
+# Keep the established module path used by imports and serialized values.
+for _public_type in (
+    Agent,
+    AgentBirth,
+    AgentBornUnderAnotherVocabulary,
+    AgentSnapshot,
+    AgentVersions,
+    BoundReached,
+    ForgettingFactorOutsideItsRange,
+    Lineage,
+    NothingWasShown,
+    OutcomeFromTheSameBar,
+    PopulationDoesNotLearn,
+    PopulationSnapshot,
+    PopulationStep,
+    PopulationState,
+    StorageReport,
+):
+    _public_type.__module__ = __name__

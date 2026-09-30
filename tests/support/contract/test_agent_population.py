@@ -23,9 +23,62 @@ from typing import ClassVar
 import pytest
 
 from liq.evolution.ecology import AgentPopulation, ArchiveEntry, Descriptor, Genome
-from liq.evolution.ecology.adapters import NullAgentPopulation
+from liq.evolution.ecology.adapters import ArrayGenomePopulation, NullAgentPopulation
+from liq.evolution.ecology.agent import (
+    ENTRY_THRESHOLD,
+    MASK_PREFIX,
+    WEIGHT_PREFIX,
+    AgentBirth,
+    PopulationState,
+)
 
 RECORDED_AT = datetime(2000, 1, 1, tzinfo=UTC)
+
+# Declared placeholders, not anybody's population: three agents differing in one
+# gene each, over two named features, so the contract below has more than one
+# parent to breed from and more than one behaviour to describe.
+ARRAY_AGENTS = 3
+ARRAY_FEATURES = ("first_feature", "second_feature")
+ARRAY_GENE_SCHEMA = "contract-genes-1"
+ARRAY_FEATURE_SCHEMA = "contract-features-1"
+ARRAY_MODEL = "contract-model-1"
+ARRAY_DESCRIPTOR_SCHEMA = "contract-descriptors-1"
+ARRAY_LEARNED = "observations"
+
+
+def an_array_genome_population() -> ArrayGenomePopulation:
+    """A small array-genome population, built fresh, holding nothing yet."""
+    span = max(ARRAY_AGENTS - 1, 1)
+    births = tuple(
+        AgentBirth(
+            agent_id=f"array-agent-{index}",
+            genome=Genome(
+                genes=MappingProxyType(
+                    {
+                        **{
+                            f"{MASK_PREFIX}{name}": float(position <= index)
+                            for position, name in enumerate(ARRAY_FEATURES)
+                        },
+                        **{
+                            f"{WEIGHT_PREFIX}{name}": index / span
+                            for name in ARRAY_FEATURES
+                        },
+                        ENTRY_THRESHOLD: 1.0 - index / span,
+                    }
+                ),
+                schema_version=ARRAY_GENE_SCHEMA,
+            ),
+            learned_state=MappingProxyType({ARRAY_LEARNED: float(index)}),
+            feature_schema_version=ARRAY_FEATURE_SCHEMA,
+            model_version=ARRAY_MODEL,
+        )
+        for index in range(ARRAY_AGENTS)
+    )
+    return ArrayGenomePopulation(
+        state=PopulationState.founded(births),
+        descriptor_schema_version=ARRAY_DESCRIPTOR_SCHEMA,
+    )
+
 
 # Declared probe objectives, not measurements: one named figure offered twice
 # unchanged and then higher, so a record is asked to keep, to refuse and to
@@ -185,3 +238,14 @@ class TestNullAgentPopulation(AgentPopulationContract):
     """The stand-in, held to the same contract as any provider-backed population."""
 
     adapter_factory = staticmethod(NullAgentPopulation)
+
+
+class TestArrayGenomePopulation(AgentPopulationContract):
+    """The array-genome population, held to the contract the stand-in is held to.
+
+    Two adapters differing in mechanism — one a dictionary of genomes, one a
+    matrix of genes — run the same suite, which is the only way the suite
+    demonstrates it is a contract rather than a description of one implementation.
+    """
+
+    adapter_factory = staticmethod(an_array_genome_population)

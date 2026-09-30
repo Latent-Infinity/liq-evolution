@@ -44,11 +44,12 @@ from liq.evolution.ecology.adapters import (
 )
 from liq.evolution.ecology.agent import (
     ENTRY_THRESHOLD,
+    FORGETTING_FACTOR,
     MASK_PREFIX,
     WEIGHT_PREFIX,
     Agent,
 )
-from liq.evolution.ecology.config import EcologyConfig
+from liq.evolution.ecology.config import EcologyConfig, LearningConfig
 from liq.evolution.ecology.types import (
     AccountState,
     Bar,
@@ -58,6 +59,7 @@ from liq.evolution.ecology.types import (
     Intent,
     NotFilled,
     PositionTarget,
+    UtcTimestamp,
 )
 
 #: Identity every account below is run under.
@@ -100,6 +102,28 @@ OPENING_EQUITY = 1.0
 #: leg carrying a position across the gap and the leg carrying it through the
 #: bar can be told apart.
 GAPPED_PATH = ((100.0, 101.0), (102.0, 104.0), (103.0, 99.0))
+
+#: A declared path long enough for an agent starting from its cold start to
+#: have learned something to act on before it ends. Two decision points pass
+#: before the online standardiser has any spread to scale by and a third
+#: before the first outcome has moved a weight, so a three-bar path can only
+#: ever show an agent that never traded.
+CLIMBING_PATH = (
+    (100.0, 101.0),
+    (101.0, 103.0),
+    (103.0, 106.0),
+    (106.0, 110.0),
+    (110.0, 115.0),
+    (115.0, 121.0),
+    (121.0, 128.0),
+    (128.0, 136.0),
+)
+
+#: Vocabulary the decision model below is versioned under, and how fast the
+#: shipped agent discards what it learned. Neither is a subject of any check
+#: here; both are required of any agent that learns.
+MODEL_VERSION = "accounts-shape-model-1"
+FORGETS_AT = 0.97
 
 #: Half the account: an exposure that is neither flat nor the whole of it, so
 #: the two legs of a bar compound rather than cancelling into one step.
@@ -160,6 +184,7 @@ class _WantsInTurn:
     wanted: tuple[float, ...]
     agent_id: str = AGENT_ID
     asked: int = 0
+    shown: list[tuple[UtcTimestamp, float]] = field(default_factory=list)
 
     def intend(self, window: BarWindow, instrument: str) -> Intent:
         """Want whatever this decision point was scripted to want."""
@@ -171,6 +196,16 @@ class _WantsInTurn:
             target_exposure=exposure,
             as_of=window.as_of,
         )
+
+    def observe(self, as_of: UtcTimestamp, outcome: float) -> None:
+        """Keep what the account said the last reading earned, and learn nothing.
+
+        Kept rather than discarded so the account's side of the settlement can
+        be asserted: what is under test here is that the account pairs each
+        outcome with the reading before it and stamps it when it became
+        knowable, which is checkable without anything learning from it.
+        """
+        self.shown.append((as_of, outcome))
 
 
 @dataclass
@@ -434,19 +469,36 @@ def test_the_shipped_agent_runs_end_to_end_against_both_ports() -> None:
     The scripted stand-in above says what the account does with a wish; this
     says the account is reachable from the agent that actually forms one, so
     nothing in between is wired only to a stand-in.
+
+    The loop is now a circle rather than a line, and the last assertion is the
+    one that closes it: the agent starts at its declared cold start, the
+    account tells it what each reading earned, the weights it reads move
+    because of that, and what it then wants reaches the model. An account that
+    asked for wishes and never settled them would pass everything above this
+    line with an agent frozen at zero.
     """
     genome = Genome(
         genes={
             f"{MASK_PREFIX}{LEVEL}": 1.0,
             f"{WEIGHT_PREFIX}{LEVEL}": 1.0,
             ENTRY_THRESHOLD: 0.0,
+            FORGETTING_FACTOR: FORGETS_AT,
         },
         schema_version=GENE_SCHEMA_VERSION,
     )
+    agent = Agent.founded(
+        agent_id=AGENT_ID,
+        genome=genome,
+        feature_schema_version=SCHEMA_VERSION,
+        model_version=MODEL_VERSION,
+        learning=LearningConfig(),
+    )
+    assert set(agent.learned_weights().values()) == {0.0}
+
     run = evaluate(
-        _DeclaredPath(prices=GAPPED_PATH),
+        _DeclaredPath(prices=CLIMBING_PATH),
         _config(),
-        agent=Agent(agent_id=AGENT_ID, genome=genome),
+        agent=agent,
         instrument=INSTRUMENT,
         sizer=NullRiskSizer(),
         simulator=NullExecutionSimulator(
@@ -457,9 +509,44 @@ def test_the_shipped_agent_runs_end_to_end_against_both_ports() -> None:
 
     assert run.agent_id == AGENT_ID
     assert run.instrument == INSTRUMENT
-    assert len(run.states) == len(GAPPED_PATH)
+    assert len(run.states) == len(CLIMBING_PATH)
     assert any(isinstance(outcome, Fill) for outcome in run.fills)
     assert run.states[-1].costs_charged > 0.0
+    assert set(agent.learned_weights().values()) != {0.0}
+
+
+def test_each_outcome_is_paired_with_the_reading_before_it() -> None:
+    """What the account settles at a decision point is the previous bar's move.
+
+    Three things, and the third is the one a stand-in can see that the shipped
+    agent's own refusal would only raise on. Nothing is settled at the first
+    decision point, because no reading stands behind it. Every settlement
+    afterwards is stamped at the decision point it is delivered in, which is
+    strictly after the reading it belongs to. And the number is the move
+    between the two closes rather than anything the account itself did, so an
+    agent that stayed flat is still shown what the tape did.
+    """
+    scripted = _WantsInTurn(wanted=(0.0,) * len(CLIMBING_PATH))
+    evaluate(
+        _DeclaredPath(prices=CLIMBING_PATH),
+        _config(),
+        agent=scripted,
+        instrument=INSTRUMENT,
+        sizer=NullRiskSizer(),
+        simulator=NullExecutionSimulator(
+            effective_round_trip_bps=DECLARED_ROUND_TRIP_BPS
+        ),
+        opening_equity=OPENING_EQUITY,
+    )
+
+    settled = scripted.shown
+    assert len(settled) == len(CLIMBING_PATH) - 1
+    stamps = tuple(ORIGIN + (index + 2) * BAR_DURATION for index in range(len(settled)))
+    assert tuple(as_of for as_of, _ in settled) == stamps
+    assert tuple(outcome for _, outcome in settled) == tuple(
+        CLIMBING_PATH[index + 1][1] / CLIMBING_PATH[index][1] - 1.0
+        for index in range(len(settled))
+    )
 
 
 def test_a_pass_over_nothing_scores_nothing() -> None:

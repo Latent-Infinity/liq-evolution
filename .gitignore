@@ -212,3 +212,6 @@ results/
 
 # Serena
 .serena/
+
+# Local agent evidence and scratch files
+.omo/

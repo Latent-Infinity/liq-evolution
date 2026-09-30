@@ -60,6 +60,7 @@ from liq.evolution.ecology.types import (
     PositionTarget,
     Rejection,
     SizingOutcome,
+    UtcTimestamp,
 )
 
 #: Identity every run below is driven under.
@@ -187,9 +188,18 @@ class _DeclaredPath:
 
 @dataclass
 class _WantsHalf:
-    """A stand-in wanting the same declared exposure at every decision point."""
+    """A stand-in wanting the same declared exposure at every decision point.
+
+    It learns nothing, and accepting the settlement without doing anything with
+    it is how it says so: what an account writes down is this module's subject,
+    and an exposure that came from a genome and a weight vector would make
+    every line depend on an estimator's arithmetic.
+    """
 
     agent_id: str = AGENT_ID
+
+    def observe(self, as_of: UtcTimestamp, outcome: float) -> None:
+        """Be told what the last reading earned, and learn nothing from it."""
 
     def intend(self, window: BarWindow, instrument: str) -> Intent:
         """Want the declared exposure."""
