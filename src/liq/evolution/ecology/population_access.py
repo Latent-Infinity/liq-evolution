@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
+import numpy as np
+
 from liq.evolution.ecology.types import (
     AgentId,
     Genome,
@@ -75,9 +77,21 @@ class _AccessMixin(_PopulationStateFields):
 
         Written by whatever knows what actually traded, never inferred from what
         was wanted: the gap between the two is the thing the realised-fill rule
-        exists to keep visible.
+        exists to keep visible. Every call is also appended to the agent's
+        bounded exposure history, which is what its descriptors read.
         """
-        self._realised[self._row(agent_id)] = exposure
+        row = self._row(agent_id)
+        self._realised[row] = exposure
+        self._exposures_retained[row] = _append_bounded(
+            self._exposures[row], int(self._exposures_retained[row]), exposure
+        )
+
+    def exposures(self, agent_id: AgentId) -> tuple[float, ...]:
+        """Return one agent's retained realised exposures, oldest first."""
+        row = self._row(agent_id)
+        return tuple(
+            self._exposures[row, : int(self._exposures_retained[row])].tolist()
+        )
 
     def record_outcome(self, agent_id: AgentId, value: float) -> None:
         """Append one of ``agent_id``'s own outcomes to its history.
@@ -87,23 +101,59 @@ class _AccessMixin(_PopulationStateFields):
         never a padded window pretending to be a full one.
         """
         row = self._row(agent_id)
-        retained = int(self._retained[row])
-        if retained < self.history_capacity:
-            self._history[row, retained] = value
-            self._retained[row] = retained + 1
-            return
-        self._history[row, :-1] = self._history[row, 1:]
-        self._history[row, -1] = value
+        self._retained[row] = _append_bounded(
+            self._history[row], int(self._retained[row]), value
+        )
 
     def history(self, agent_id: AgentId) -> tuple[float, ...]:
         """Return one agent's retained outcomes, oldest first."""
         row = self._row(agent_id)
         return tuple(self._history[row, : int(self._retained[row])].tolist())
 
+    def record_reference_return(self, value: float) -> None:
+        """Append the reference's return over one decision point, for the population.
+
+        Written once per decision point by the accounting step, from the prices
+        the accounts were marked on, and bounded by the same ceiling as every
+        agent's outcome history, so the last outcomes of any agent line up with
+        the last entries here.
+        """
+        self._reference_retained = _append_bounded(
+            self._reference, self._reference_retained, value
+        )
+
+    def reference_returns(self) -> tuple[float, ...]:
+        """Return the retained reference returns, oldest first."""
+        return tuple(self._reference[: self._reference_retained].tolist())
+
     def lineage(self, agent_id: AgentId) -> Lineage:
-        """Return where one agent came from."""
-        return self._lineage[self._row(agent_id)]
+        """Return where one agent came from, alive or dead.
+
+        Raises:
+            KeyError: If no agent of that identity ever lived here.
+        """
+        try:
+            return self._lineage_of[agent_id]
+        except KeyError:
+            raise KeyError(
+                f"{agent_id!r} never lived in this population; the living are "
+                f"{self._ids} and the departed {tuple(self._departed)}"
+            ) from None
 
     def versions(self, agent_id: AgentId) -> AgentVersions:
         """Return what one agent was born under."""
         return self._versions[self._row(agent_id)]
+
+
+def _append_bounded(buffer: np.ndarray, retained: int, value: float) -> int:
+    """Append ``value`` to a bounded history held in ``buffer``; return how many it holds.
+
+    Once the buffer is full the oldest value is dropped, so what is retained is
+    always the most recent, oldest first.
+    """
+    if retained < len(buffer):
+        buffer[retained] = value
+        return retained + 1
+    buffer[:-1] = buffer[1:]
+    buffer[-1] = value
+    return retained

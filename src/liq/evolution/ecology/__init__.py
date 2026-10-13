@@ -8,16 +8,19 @@ what actually happened to its own evaluation account.
 This package owns the domain's vocabulary and the capabilities it reaches the
 rest of the platform through. :mod:`liq.evolution.ecology.types` holds the
 immutable values that cross those boundaries; :mod:`liq.evolution.ecology.ports`
-holds the five capabilities themselves — supplying decision points, deciding
-what may be held, acting on it, keeping the population, and drawing from a
-declared null. Domain and use-case code depends on these protocols only.
+holds the six capabilities themselves — supplying decision points, deciding
+what may be held, acting on it, keeping the population, drawing from a declared
+null, and deflating the fitness a population is compared on. Domain and
+use-case code depends on these protocols only.
 Adapters that translate a particular library into them live at the edges, and
 which adapter is used is decided where the run is assembled, never here.
 
 :mod:`liq.evolution.ecology.accounts`, :mod:`liq.evolution.ecology.agent`,
 :mod:`liq.evolution.ecology.config`, :mod:`liq.evolution.ecology.driver`,
 :mod:`liq.evolution.ecology.learning`, :mod:`liq.evolution.ecology.substrate`,
-:mod:`liq.evolution.ecology.features`
+:mod:`liq.evolution.ecology.features`, :mod:`liq.evolution.ecology.genome_schema`,
+:mod:`liq.evolution.ecology.population_accounts`,
+:mod:`liq.evolution.ecology.steady_state`, :mod:`liq.evolution.ecology.inheritance`
 and :mod:`liq.evolution.ecology.errors`
 are reached as attributes of this package rather than re-exported name by name. The boundary ``__all__`` names is
 the ports and the values that cross them, and it is asserted to be exactly that;
@@ -32,13 +35,18 @@ from liq.evolution.ecology import (  # noqa: F401
     driver,
     errors,
     features,
+    genome_schema,
+    inheritance,
     learning,
+    population_accounts,
+    steady_state,
     substrate,
 )
 from liq.evolution.ecology.ports import (
     AgentPopulation,
     BarSource,
     ExecutionSimulator,
+    FitnessDeflator,
     RiskSizer,
     SurrogateSource,
 )
@@ -50,17 +58,23 @@ from liq.evolution.ecology.types import (
     BarWindow,
     CostProvenance,
     CostScenarioId,
+    DeflatedFitness,
     Descriptor,
     Fill,
+    FitnessSample,
     Genome,
     InstrumentId,
     Intent,
     NotFilled,
     NullDeclaration,
+    Offspring,
     PositionTarget,
+    RecordCoverage,
+    RecordPayload,
     Rejection,
     SegmentRole,
     SizingOutcome,
+    Standing,
     SurrogateSeries,
     UtcTimestamp,
 )
@@ -75,19 +89,26 @@ __all__ = [
     "BarWindow",
     "CostProvenance",
     "CostScenarioId",
+    "DeflatedFitness",
     "Descriptor",
     "ExecutionSimulator",
     "Fill",
+    "FitnessDeflator",
+    "FitnessSample",
     "Genome",
     "InstrumentId",
     "Intent",
     "NotFilled",
     "NullDeclaration",
+    "Offspring",
     "PositionTarget",
+    "RecordCoverage",
+    "RecordPayload",
     "Rejection",
     "RiskSizer",
     "SegmentRole",
     "SizingOutcome",
+    "Standing",
     "SurrogateSeries",
     "SurrogateSource",
     "UtcTimestamp",

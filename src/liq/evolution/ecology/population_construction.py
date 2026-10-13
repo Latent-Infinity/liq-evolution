@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Self
+from typing import Self
 
 import numpy as np
 
@@ -15,6 +15,7 @@ from liq.evolution.ecology.config import (
     PopulationConfig,
 )
 from liq.evolution.ecology.types import (
+    AgentId,
     UtcTimestamp,
 )
 
@@ -24,6 +25,7 @@ from .agent_contracts import (
     AgentVersions,
     BoundReached,
     ForgettingFactorOutsideItsRange,
+    LearnedStateDisposition,
     Lineage,
     PopulationSnapshot,
     StartingStateOutsideItsBound,
@@ -32,15 +34,9 @@ from .agent_genes import (
     ENTRY_THRESHOLD,
     FLAT,
     FORGETTING_FACTOR,
-    STORAGE_DTYPE,
     WEIGHT_PREFIX,
     _gene_layout,
 )
-
-if TYPE_CHECKING:
-    pass
-
-
 from .population_state_fields import _PopulationStateFields
 
 
@@ -60,7 +56,9 @@ class _ConstructionMixin(_PopulationStateFields):
                 under, or if that ceiling retains nothing.
             ValueError: Also if a reading awaiting its outcome is carried into
                 a population that does not learn, or does not name exactly the
-                living agents at the population's feature width.
+                living agents at the population's feature width; or if a
+                departed agent is recorded twice, is among the living, or
+                carries no death instant; or if a refusal count is negative.
             ForgettingFactorOutsideItsRange: If the population learns and some
                 genome carries a forgetting factor the configuration disallows.
             KeyError: If the population learns and the agents were not born
@@ -96,26 +94,23 @@ class _ConstructionMixin(_PopulationStateFields):
         self._entry_at = self.gene_names.index(ENTRY_THRESHOLD)
         self._features = len(self.feature_names)
 
-        count = len(agents)
-        self._genes = np.zeros((count, len(self.gene_names)), dtype=STORAGE_DTYPE)
-        self._learned = np.zeros((count, len(self.learned_names)), dtype=STORAGE_DTYPE)
-        self._intended = np.zeros(count, dtype=STORAGE_DTYPE)
-        self._realised = np.zeros(count, dtype=STORAGE_DTYPE)
-        self._history = np.zeros((count, self.history_capacity), dtype=STORAGE_DTYPE)
-        self._retained = np.zeros(count, dtype=np.int64)
+        self._stores = {}
+        self._allocate(len(agents))
+        self._reallocations = 0
         for row, held in enumerate(agents):
             self._admit(row, held)
-        self._lineage = tuple(
-            Lineage(agent_id=held.agent_id, parents=held.parents, born_at=held.born_at)
-            for held in agents
-        )
-        self._versions = tuple(
+        self._hold_the_reference_returns(snapshot.reference_returns)
+        self._lineage_of = {held.agent_id: _lineage(held) for held in agents}
+        self._departed = []
+        self._refusals = _a_count(snapshot.admission_refusals)
+        self._hold_the_departed(snapshot.departed)
+        self._versions = [
             AgentVersions(
                 feature_schema_version=held.feature_schema_version,
                 model_version=held.model_version,
             )
             for held in agents
-        )
+        ]
         self._born_under = {
             version.feature_schema_version for version in self._versions
         }
@@ -138,14 +133,49 @@ class _ConstructionMixin(_PopulationStateFields):
                 "fast an agent forgets is inherited, never defaulted"
             )
         self._forgetting_at = self.gene_names.index(FORGETTING_FACTOR)
-        rates = self._genes[:, self._forgetting_at]
+        self._refuse_rates_outside_the_range(
+            self._genes[:, self._forgetting_at], self._ids
+        )
+        self._update = online.OnlineUpdate(
+            config=configured,
+            features=self.feature_names,
+            column_of=self._learned_at,
+        )
+
+    def _hold_the_departed(self, departed: Sequence[Lineage]) -> None:
+        """Take back the lineage of the dead, refusing a record that is not one."""
+        for lineage in departed:
+            if lineage.died_at is None:
+                raise ValueError(
+                    f"{lineage.agent_id!r} is recorded as departed with no death "
+                    "instant, so nothing says when it stopped being alive"
+                )
+            if lineage.death_kind is None:
+                raise ValueError(
+                    f"{lineage.agent_id!r} is recorded as departed with no death "
+                    "kind, so nothing says whether evidence or age decided it"
+                )
+            if lineage.agent_id in self._lineage_of:
+                raise ValueError(
+                    f"{lineage.agent_id!r} is recorded as departed and is also "
+                    "alive, or departed twice; one identity is one life"
+                )
+            self._lineage_of[lineage.agent_id] = lineage
+            self._departed.append(lineage.agent_id)
+
+    def _refuse_rates_outside_the_range(
+        self, rates: np.ndarray, ids: tuple[AgentId, ...]
+    ) -> None:
+        """Refuse forgetting factors the configuration does not allow."""
+        assert self.learning is not None
+        configured = self.learning
         outside = (rates < configured.forgetting_minimum) | (
             rates > configured.forgetting_maximum
         )
         if outside.any():
             strangers = tuple(
                 agent_id
-                for agent_id, out in zip(self._ids, outside.tolist(), strict=True)
+                for agent_id, out in zip(ids, outside.tolist(), strict=True)
                 if out
             )
             raise ForgettingFactorOutsideItsRange(
@@ -154,11 +184,6 @@ class _ConstructionMixin(_PopulationStateFields):
                 f"{configured.forgetting_maximum}]: "
                 f"{sorted(set(rates[outside].tolist()))}"
             )
-        self._update = online.OnlineUpdate(
-            config=configured,
-            features=self.feature_names,
-            column_of=self._learned_at,
-        )
 
     @classmethod
     def founded(
@@ -205,46 +230,31 @@ class _ConstructionMixin(_PopulationStateFields):
                 state carries a gain outside the declared state bound.
         """
         held = PopulationConfig() if population is None else population
-        starts = tuple(_starting_state(birth, learning) for birth in births)
+        born = tuple(_born(birth, learning) for birth in births)
         founded = cls(
             PopulationSnapshot(
-                agents=tuple(
-                    AgentSnapshot(
-                        agent_id=birth.agent_id,
-                        genome=birth.genome,
-                        learned_state=start.learned_state,
-                        intended=FLAT,
-                        realised=FLAT,
-                        history=(),
-                        parents=birth.parents,
-                        born_at=birth.born_at,
-                        feature_schema_version=birth.feature_schema_version,
-                        model_version=birth.model_version,
-                    )
-                    for birth, start in zip(births, starts, strict=True)
-                ),
+                agents=tuple(one.held for one in born),
                 history_capacity=held.history_capacity,
                 learning=learning,
                 bounds_reached=tuple(
-                    BoundReached(
-                        agent_id=birth.agent_id,
-                        as_of=birth.born_at,
-                        bound=STATE_BOUND_KEY,
-                        at_founding=True,
-                    )
-                    for birth, start in zip(births, starts, strict=True)
-                    if start.held_at_founding
+                    one.founding_hold for one in born if one.founding_hold
                 ),
             )
         )
         founded._refuse_a_start_outside_the_bound(
-            np.asarray([start.carried for start in starts], dtype=np.bool_)
+            founded._learned,
+            np.asarray([one.carried for one in born], dtype=np.bool_),
+            founded._ids,
         )
         return founded
 
-    def _refuse_a_start_outside_the_bound(self, carried: np.ndarray) -> None:
+    def _refuse_a_start_outside_the_bound(
+        self, learned: np.ndarray, carried: np.ndarray, ids: tuple[AgentId, ...]
+    ) -> None:
         """Refuse agents whose starting state their bounds would not admit.
 
+        The one refusal every birth path applies, founding and admission
+        alike, over the learned rows ``learned`` of the agents ``ids``.
         Applied at a birth and not at a restore: a restored agent resumes a
         state the bound already held, and a restore never re-reads a prior.
         ``carried`` marks the births that inherited a learned state, whose gain
@@ -252,15 +262,15 @@ class _ConstructionMixin(_PopulationStateFields):
         """
         if self._update is None:
             return
-        unfit = self._update.unfit_to_start(self._learned, carried)
+        unfit = self._update.unfit_to_start(learned, carried)
         if not unfit.any():
             return
-        weight_norms = self._update.weight_norms(self._learned).tolist()
-        gain_norms = self._update.state_norms(self._learned).tolist()
+        weight_norms = self._update.weight_norms(learned).tolist()
+        gain_norms = self._update.state_norms(learned).tolist()
         strangers = {
             agent_id: {"weight_norm": weight, "gain_norm": gain}
             for agent_id, weight, gain, out in zip(
-                self._ids, weight_norms, gain_norms, unfit.tolist(), strict=True
+                ids, weight_norms, gain_norms, unfit.tolist(), strict=True
             )
             if out
         }
@@ -287,6 +297,85 @@ class _ConstructionMixin(_PopulationStateFields):
             PopulationState: The same population, mid-walk.
         """
         return cls(snapshot)
+
+
+@dataclass(frozen=True)
+class _Born:
+    """One birth, made ready for whichever path admits it.
+
+    Attributes:
+        held: The agent as it enters the population.
+        carried: Whether its learned state was inherited, so its gain is
+            checked against the state bound as well as its weights.
+        founding_hold: The record of its founding gain being held, or
+            ``None`` where the bound did not act.
+    """
+
+    held: AgentSnapshot
+    carried: bool
+    founding_hold: BoundReached | None
+
+
+def _born(birth: AgentBirth, learning: LearningConfig | None) -> _Born:
+    """The single birth rule: what ``birth`` starts from, and what it records.
+
+    Every path that brings an agent into being — :meth:`founded` and an
+    admission into a population already walking — goes through here and
+    nowhere else, so there is one starting state, one founding hold and one
+    record of it.
+    """
+    start = _starting_state(birth, learning)
+    return _Born(
+        held=AgentSnapshot(
+            agent_id=birth.agent_id,
+            genome=birth.genome,
+            learned_state=start.learned_state,
+            intended=FLAT,
+            realised=FLAT,
+            history=(),
+            parents=birth.parents,
+            born_at=birth.born_at,
+            feature_schema_version=birth.feature_schema_version,
+            model_version=birth.model_version,
+            mutation_scale=birth.mutation_scale,
+            spawn_seed=birth.spawn_seed,
+            learned_state_disposition=(
+                LearnedStateDisposition.CARRIED
+                if birth.learned_state
+                else LearnedStateDisposition.NOTHING_CARRIED
+            ),
+        ),
+        carried=start.carried,
+        founding_hold=(
+            BoundReached(
+                agent_id=birth.agent_id,
+                as_of=birth.born_at,
+                bound=STATE_BOUND_KEY,
+                at_founding=True,
+            )
+            if start.held_at_founding
+            else None
+        ),
+    )
+
+
+def _lineage(held: AgentSnapshot) -> Lineage:
+    """Where a living agent came from, as its snapshot records it."""
+    return Lineage(
+        agent_id=held.agent_id,
+        parents=held.parents,
+        born_at=held.born_at,
+        mutation_scale=held.mutation_scale,
+        spawn_seed=held.spawn_seed,
+        learned_state_disposition=held.learned_state_disposition,
+    )
+
+
+def _a_count(count: int) -> int:
+    """``count``, refused if it is not one."""
+    if count < 0:
+        raise ValueError(f"a count of refusals cannot be negative; it was {count}")
+    return count
 
 
 @dataclass(frozen=True)

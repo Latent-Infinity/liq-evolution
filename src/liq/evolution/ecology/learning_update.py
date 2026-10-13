@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -190,11 +190,11 @@ class OnlineUpdate:
 
     def state_norms(self, learned: NDArray[np.float64]) -> NDArray[np.float64]:
         """How big each agent's gain is, as one number per agent."""
-        return np.linalg.norm(self.gains(learned), axis=1)
+        return _gain_norms(self._config, learned[:, self._energy_at])
 
     def weight_norms(self, learned: NDArray[np.float64]) -> NDArray[np.float64]:
         """How big each agent's learned weight vector is."""
-        return np.linalg.norm(self.weights(learned), axis=1)
+        return _norms(self.weights(learned))
 
     def _gain_from(self, energy: NDArray[np.float64]) -> NDArray[np.float64]:
         """The gain implied by an accumulated squared gradient."""
@@ -234,14 +234,27 @@ class OnlineUpdate:
         penalty is subtracted after scaling — while the denominator, a function
         of accumulated evidence, does not move. So the new norm is at most ``c``
         times the old, and ``c`` is chosen to land it on the bound.
+
+        "On the bound" is in exact arithmetic; in floating point the scaled
+        weights can come out a unit in the last place over it, and a start is
+        refused by comparing the same norm with the same bound. So ``c`` is
+        lowered until the norm :meth:`weight_norms` computes is inside, and a
+        held state is admissible at a birth by construction, not by tolerance.
         """
         bound = self._config.weight_norm_bound
-        size = np.linalg.norm(weights, axis=1)
+        size = _norms(weights)
         over = size > bound
         if not over.any():
             return drift, weights, over
         held_drift = drift.copy()
-        held_drift[over] *= (bound / size[over])[:, None]
+        scaled = drift[over]
+        rows = energy[over]
+        held_drift[over] = _landed_inside(
+            lambda shrink: scaled * shrink[:, None],
+            lambda candidate: _norms(self._weights_from(candidate, rows)),
+            bound,
+            bound / size[over],
+        )
         return held_drift, self._weights_from(held_drift, energy), over
 
 
@@ -282,15 +295,57 @@ def _hold_the_gain(
     about having been held.
     """
     bound = config.state_bound
-    size = np.linalg.norm(_gain_from(config, energy), axis=1)
+    size = _gain_norms(config, energy)
     over = size > bound
     if not over.any():
         return energy, over
     held = energy.copy()
-    shrink = (bound / size[over])[:, None]
-    root = (config.step_offset + np.sqrt(held[over])) / shrink
-    held[over] = np.maximum(root - config.step_offset, 0.0) ** 2
+    base = config.step_offset + np.sqrt(held[over])
+    held[over] = _landed_inside(
+        lambda shrink: (
+            np.maximum(base / shrink[:, None] - config.step_offset, 0.0) ** 2
+        ),
+        lambda candidate: _gain_norms(config, candidate),
+        bound,
+        bound / size[over],
+    )
     return held, over
+
+
+def _norms(rows: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Each row's Euclidean norm: the one computation every bound is judged by."""
+    return np.linalg.norm(rows, axis=1)
+
+
+def _gain_norms(
+    config: LearningConfig, energy: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """How big the gain implied by ``energy`` is, one number per row."""
+    return _norms(_gain_from(config, energy))
+
+
+def _landed_inside(
+    candidate: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    norms: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    bound: float,
+    shrink: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """The held rows ``candidate(shrink)``, with ``shrink`` lowered until they fit.
+
+    ``shrink`` is the exact-arithmetic factor that lands each row on ``bound``.
+    Rounding can leave a row a unit in the last place over, which the refusal
+    of a start reads as outside. Any row still over has its factor lowered by a
+    relative step that doubles until it moves the result, so the loop ends
+    after a handful of passes and never clips: what is held is still the
+    family's own state, recomputed from a smaller factor.
+    """
+    landed = candidate(shrink)
+    step = np.finfo(np.float64).eps
+    while (over := norms(landed) > bound).any():
+        shrink = np.where(over, shrink * (1.0 - step), shrink)
+        landed = candidate(shrink)
+        step *= 2.0
+    return landed
 
 
 def _columns(names: Sequence[str], column_of: Mapping[str, int]) -> NDArray[np.intp]:

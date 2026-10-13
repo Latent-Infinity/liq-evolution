@@ -75,10 +75,11 @@ remembering to be careful.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Protocol
 
 from liq.evolution.ecology.config import EcologyConfig
-from liq.evolution.ecology.driver import walk
 from liq.evolution.ecology.errors import EcologyError
 from liq.evolution.ecology.logctx import SILENT, Event, RunLog
 from liq.evolution.ecology.ports import BarSource, ExecutionSimulator, RiskSizer
@@ -204,6 +205,12 @@ def evaluate(
     decision point offered out of order, twice, or in a segment already left
     stops the run where it is refused rather than being scored.
 
+    The agent is evaluated as a population of one, through the same driver
+    that advances every account of a population that turns over in
+    :class:`~liq.evolution.ecology.population_accounts.PopulationAccounts`. Two
+    drivers of one account could take a decision point in two orders; one
+    driver cannot.
+
     Args:
         source: Where decision points come from. Only the port is used.
         config: How the pass is driven, and the record of what it was allowed to
@@ -237,32 +244,80 @@ def evaluate(
         DecisionPointNotPriced: If a decision point carries no completed bar for
             ``instrument``.
     """
-    if opening_equity <= 0.0:
-        raise ValueError(
-            f"an evaluation account must open with something: {opening_equity} "
-            "leaves no notional for an exposure to be a fraction of and no "
-            "figure for a score to be earned on"
-        )
-    account = _EvaluationAccount(
-        agent=agent,
+    evaluated = PopulationAccounts(
+        _OneMember(agent),
         instrument=instrument,
         sizer=sizer,
         simulator=simulator,
-        equity=opening_equity,
-        log=log,
-    )
-    history = walk(source, config, visit=account.visit, log=log)
-    return Evaluation(
-        agent_id=agent.agent_id,
-        instrument=instrument,
-        cost_scenario_id=simulator.cost_scenario_id,
         opening_equity=opening_equity,
-        states=tuple(account.states),
-        fills=tuple(account.fills),
-        rejections=tuple(account.rejections),
-        events=tuple(account.events),
-        history=history,
-    )
+        log=log,
+    ).run(source, config)
+    return evaluated.accounts[agent.agent_id]
 
 
-from .account_state import AccountEvent, Evaluation, _EvaluationAccount  # noqa: E402
+@dataclass(frozen=True)
+class _OneWish:
+    """What a population of one formed at a decision point: its member's wish.
+
+    The wish is filed under the member that formed it, not under whatever
+    identity the wish itself names: what an account makes of a wish is the
+    mandate's to decide, and a lookup keyed by the wish would refuse it first.
+    """
+
+    agent_id: AgentId
+    intent: Intent
+
+    @property
+    def agent_ids(self) -> tuple[AgentId, ...]:
+        """The one member the wish belongs to."""
+        return (self.agent_id,)
+
+    def intents(self) -> tuple[Intent, ...]:
+        """The one wish, as the value type the rest of the ecology speaks."""
+        return (self.intent,)
+
+
+@dataclass(frozen=True)
+class _OneMember:
+    """One agent, seen as the population its evaluation account is driven through.
+
+    A single agent is evaluated as a population of one so that one driver takes
+    every account through a decision point, whether it belongs to a lone agent
+    or to a population that turns over. The agent is what is adapted, not the
+    driver: it forms its wish when the population is asked to decide, and is
+    shown what its last reading earned when the population is settled.
+
+    A lone agent keeps no record of what it holds or what each bar earned it
+    beyond its own account, which already holds both, so being told either is
+    accepted and changes nothing. Nothing is born and nothing dies.
+    """
+
+    agent: IntentFormer
+
+    def agent_ids(self) -> tuple[AgentId, ...]:
+        """The one member, alive for the whole pass."""
+        return (self.agent.agent_id,)
+
+    def observe(self, as_of: UtcTimestamp, outcomes: Mapping[AgentId, float]) -> object:
+        """Show the agent what its last reading earned."""
+        return self.agent.observe(as_of, outcomes[self.agent.agent_id])
+
+    def hold(self, agent_id: AgentId, exposure: float) -> None:
+        """Accept what the account holds; the account is the agent's record of it."""
+        del agent_id, exposure
+
+    def record_outcome(self, agent_id: AgentId, value: float) -> None:
+        """Accept what the bar earned; the account is the agent's record of it."""
+        del agent_id, value
+
+    def record_reference_return(self, value: float) -> None:
+        """Accept the reference's move; a lone agent is never described."""
+        del value
+
+    def step(self, window: BarWindow, instrument: InstrumentId) -> _OneWish:
+        """Ask the agent what it wants to hold at ``window``."""
+        return _OneWish(self.agent.agent_id, self.agent.intend(window, instrument))
+
+
+from .account_state import AccountEvent, Evaluation  # noqa: E402
+from .population_accounts import PopulationAccounts  # noqa: E402

@@ -29,6 +29,16 @@ ENTRY_THRESHOLD = "entry_threshold"
 #: another. It also sets how long a prior outlives the evidence against it.
 FORGETTING_FACTOR = "forgetting_factor"
 
+#: Gene name: the scale an agent's offspring are mutated at. A strategy gene —
+#: a parameter of the variation, not of the agent's behaviour: nothing an agent
+#: decides or learns reads it. A birth draws the child's scale from its
+#: parents' scales and mutates every other gene at that scale, and the child
+#: carries the scale it was drawn at, so the scale adapts by the same selection
+#: the behaviour does. One scale serves every gene, the forgetting factor
+#: included. A genome need not carry it; a parent without one is read at the
+#: founding scale the genome schema declares.
+MUTATION_SCALE = "mutation_scale"
+
 #: A mask gene at or above this switches its feature on. Genes are numbers, so
 #: the cut has to be written down somewhere; here, once.
 SWITCHED_ON_AT = 0.5

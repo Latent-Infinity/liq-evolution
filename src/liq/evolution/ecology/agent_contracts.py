@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC
+from enum import StrEnum
 
 from liq.evolution.ecology.config import LearningConfig
 from liq.evolution.ecology.errors import EcologyError
@@ -43,6 +44,9 @@ class ForgettingFactorOutsideItsRange(EcologyError):
 class StartingStateOutsideItsBound(EcologyError):
     """An agent would start with a learned state its configuration disallows.
 
+    A population counts every one raised at admission into it, readable from
+    ``admission_refusals``, so a run reports how many offspring it refused.
+
     Checked when an agent is admitted at birth, over whatever it starts from —
     the prior its genome declares, or a state it inherited — and computed
     exactly as the bound applied after each outcome computes it. Refused rather
@@ -55,6 +59,16 @@ class StartingStateOutsideItsBound(EcologyError):
     bound. Holding it would change what crossed the birth boundary, which is
     the thing inheritance is measured by. A birth carrying nothing is never
     refused on its gain: its founding gain is held and recorded instead.
+    """
+
+
+class ReadingAwaitsItsOutcome(EcologyError):
+    """A birth or a death was asked for between a decision point and its outcome.
+
+    The outcome is owed to exactly the agents that formed the reading. An agent
+    admitted then formed no reading its outcome could be paired with, and one
+    removed then would leave an outcome nobody can take; so who is alive changes
+    only once the reading is settled, and never by trimming or padding it.
     """
 
 
@@ -132,12 +146,43 @@ class AgentVersions:
     model_version: str
 
 
+class LearnedStateDisposition(StrEnum):
+    """What a birth carried across of anything learned before it.
+
+    Recorded per birth because it is the variable the inheritance experiment
+    turns on: a birth carrying a learned state starts from exactly that state,
+    and one carrying nothing starts from its own genome's priors.
+    """
+
+    CARRIED = "carried"
+    NOTHING_CARRIED = "nothing_carried"
+
+
+class DeathKind(StrEnum):
+    """What decided that an agent left the living.
+
+    A label on the agent's record and nothing more. Every kind of death closes
+    the agent's position through the same exit and is charged the same way, so
+    the kind can be read back but never changes what a death does.
+    """
+
+    #: Decided by evidence: the deflation told the agent apart as worse.
+    CULL = "cull"
+    #: Decided by age, where the evidence said nothing either way.
+    RETIREMENT = "retirement"
+    #: Decided by age, of an agent the evidence had told apart as better,
+    #: because nobody the evidence was silent on was left to retire.
+    PROTECTED_RETIREMENT = "protected_retirement"
+
+
 @dataclass(frozen=True)
 class Lineage:
-    """Where one agent came from.
+    """Where one agent came from, how it was made, and when it left.
 
     Kept beside the agent rather than inside its genome, because it is not
     heritable: an offspring inherits its parents' genes, not their parents.
+    Kept after the agent dies, too, because where a living agent came from
+    is answered by the dead.
 
     Attributes:
         agent_id: The agent this describes.
@@ -146,19 +191,38 @@ class Lineage:
             a birth whose parents were lost.
         born_at: The decision instant the agent was born at (UTC), or ``None``
             for a founder, which was alive before the walk began.
+        died_at: The instant the agent was removed from the living (UTC), or
+            ``None`` while it lives.
+        mutation_scale: The mutation scale in force when its genome was drawn,
+            or ``None`` where no variation produced it, as for a founder.
+        spawn_seed: The seed its genome was drawn under, or ``None``.
+        learned_state_disposition: Whether it carried a learned state across
+            its birth or started from its own priors.
+        death_kind: What decided its death, or ``None`` while it lives. Kept
+            with the rest of its lineage, so a cull and a retirement stay told
+            apart after the agent and its archive entry are gone.
     """
 
     agent_id: AgentId
     parents: tuple[AgentId, ...]
     born_at: UtcTimestamp | None
+    died_at: UtcTimestamp | None = None
+    mutation_scale: float | None = None
+    spawn_seed: int | None = None
+    learned_state_disposition: LearnedStateDisposition = (
+        LearnedStateDisposition.NOTHING_CARRIED
+    )
+    death_kind: DeathKind | None = None
 
     def __post_init__(self) -> None:
-        """Refuse a birth instant that does not say which zone it is in."""
-        if self.born_at is None:
-            return
-        if self.born_at.tzinfo is None or self.born_at.utcoffset() is None:
-            raise ValueError("born_at must be timezone-aware")
-        object.__setattr__(self, "born_at", self.born_at.astimezone(UTC))
+        """Refuse an instant that does not say which zone it is in."""
+        for name in ("born_at", "died_at"):
+            instant = getattr(self, name)
+            if instant is None:
+                continue
+            if instant.tzinfo is None or instant.utcoffset() is None:
+                raise ValueError(f"{name} must be timezone-aware")
+            object.__setattr__(self, name, instant.astimezone(UTC))
 
 
 @dataclass(frozen=True)
@@ -181,7 +245,10 @@ class AgentBirth:
         model_version: Decision model it is born under.
         parents: Who it was born of. Empty for a founder.
         born_at: The decision instant it was born at (UTC), or ``None`` for a
-            founder.
+            founder. Required of a birth into a population already walking.
+        mutation_scale: The mutation scale in force when its genome was drawn,
+            or ``None`` where no variation produced it.
+        spawn_seed: The seed its genome was drawn under, or ``None``.
     """
 
     agent_id: AgentId
@@ -191,6 +258,8 @@ class AgentBirth:
     model_version: str
     parents: tuple[AgentId, ...] = ()
     born_at: UtcTimestamp | None = None
+    mutation_scale: float | None = None
+    spawn_seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -198,7 +267,7 @@ class AgentSnapshot:
     """One agent, whole, at one instant — everything needed to go on being it.
 
     The parts a resume would change are ``learned_state``, ``intended``,
-    ``realised`` and ``history``; the rest is what the agent is and does not
+    ``realised``, ``history`` and ``exposures``; the rest is what the agent is and does not
     move. Both halves are carried, because a snapshot that held only the moving
     half could be written but not restored.
 
@@ -213,10 +282,15 @@ class AgentSnapshot:
             refused, reduced or never reached leaves the two apart, and it is
             the realised side an agent is scored on.
         history: The agent's own retained outcomes, oldest first.
+        exposures: The agent's retained realised exposures, one per ``hold``,
+            oldest first: what its descriptors read.
         parents: Who it was born of.
         born_at: The decision instant it was born at (UTC), or ``None``.
         feature_schema_version: Feature vocabulary it was born under.
         model_version: Decision model it was born under.
+        mutation_scale: As its :class:`Lineage` records it.
+        spawn_seed: As its :class:`Lineage` records it.
+        learned_state_disposition: As its :class:`Lineage` records it.
     """
 
     agent_id: AgentId
@@ -229,6 +303,12 @@ class AgentSnapshot:
     born_at: UtcTimestamp | None
     feature_schema_version: str
     model_version: str
+    mutation_scale: float | None = None
+    spawn_seed: int | None = None
+    learned_state_disposition: LearnedStateDisposition = (
+        LearnedStateDisposition.NOTHING_CARRIED
+    )
+    exposures: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -277,6 +357,15 @@ class PopulationSnapshot:
             it had been held would describe the same run as one that never was.
         pending: The reading awaiting its outcome, or ``None`` at a settled
             boundary. See :class:`PendingReading`.
+        departed: The lineage of every agent removed from the living, in the
+            order it was removed, each with its death instant and the kind of
+            its death.
+        admission_refusals: How many births were refused at admission for a
+            start outside its bounds. Carried so a resumed run counts on from
+            where it was rather than from zero.
+        reference_returns: The population's retained reference returns, one
+            per decision point after a pass's first, oldest first: what every
+            agent's beta descriptor is estimated against.
     """
 
     agents: tuple[AgentSnapshot, ...]
@@ -284,6 +373,9 @@ class PopulationSnapshot:
     learning: LearningConfig | None = None
     bounds_reached: tuple[BoundReached, ...] = ()
     pending: PendingReading | None = None
+    departed: tuple[Lineage, ...] = ()
+    admission_refusals: int = 0
+    reference_returns: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -390,6 +482,12 @@ class StorageReport:
 
     Attributes:
         agents: How many agents are alive.
+        capacity: How many agents the arrays have room for. A death frees a
+            row and a birth takes one; only a birth with no room left grows
+            the arrays.
+        reallocations: How many times the arrays have been grown since the
+            population was built. A birth or death that did not move this did
+            not rebuild the store.
         gene_columns: How many genes each agent carries.
         feature_columns: How many features the genes switch on and weight.
         learned_columns: How many named values each agent can learn.
@@ -400,6 +498,8 @@ class StorageReport:
     """
 
     agents: int
+    capacity: int
+    reallocations: int
     gene_columns: int
     feature_columns: int
     learned_columns: int

@@ -14,10 +14,11 @@ point, so a mutable value would let one reader change what another sees.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, get_args
 
 __all__ = [
     "AccountState",
@@ -27,17 +28,23 @@ __all__ = [
     "BarWindow",
     "CostProvenance",
     "CostScenarioId",
+    "DeflatedFitness",
     "Descriptor",
     "Fill",
+    "FitnessSample",
     "Genome",
     "InstrumentId",
     "Intent",
     "NotFilled",
     "NullDeclaration",
+    "Offspring",
     "PositionTarget",
+    "RecordCoverage",
+    "RecordPayload",
     "Rejection",
     "SegmentRole",
     "SizingOutcome",
+    "Standing",
     "SurrogateSeries",
     "UtcTimestamp",
 ]
@@ -68,6 +75,12 @@ type CostScenarioId = str
 # What a walk-forward segment is used for. A run visits segments in order and
 # never revisits one.
 type SegmentRole = Literal["train", "validate", "test"]
+
+
+# Where a deflator places one agent against the population it was compared
+# with, at the deflator's declared confidence: told apart below it, not told
+# apart at all, or told apart above it. Only "worse" licenses a cull.
+type Standing = Literal["worse", "indistinguishable", "better"]
 
 
 @dataclass(frozen=True)
@@ -445,6 +458,49 @@ class Genome:
 
 
 @dataclass(frozen=True)
+class Offspring:
+    """One birth: the child, and the variation that produced it.
+
+    A bare genome cannot say what was done to make it, so neither the scale of
+    variation in force nor a boundary rule acting on a gene could be recorded
+    with the birth — and a birth whose variation cannot be read back cannot be
+    checked against the rule that was declared for it. The child and its
+    variation therefore travel together.
+
+    Attributes:
+        genome: The child's heritable part, in its parents' vocabulary.
+        mutation_scale: The mutation scale in force when this child was drawn,
+            or ``None`` where no adaptive scale is in force at all — variation
+            that introduces no magnitude has none to report. Where present it
+            is a positive finite number.
+        boundary_firings: Gene name to how many times the boundary rule acted
+            on that gene during this birth. Every gene the child carries is
+            named, zero where the rule did not act, so an absent count can
+            never be mistaken for a rule that did not fire.
+    """
+
+    genome: Genome
+    mutation_scale: float | None
+    boundary_firings: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        """Refuse a report that does not describe the child it travels with."""
+        scale = self.mutation_scale
+        if scale is not None and not (math.isfinite(scale) and scale > 0.0):
+            raise ValueError(
+                "a mutation scale in force must be positive and finite; a birth "
+                "with no adaptive scale reports None rather than a number"
+            )
+        if set(self.boundary_firings) != set(self.genome.genes):
+            raise ValueError(
+                "boundary firings must name exactly the genes the child carries, "
+                "zero where the rule did not act"
+            )
+        if any(count < 0 for count in self.boundary_firings.values()):
+            raise ValueError("a boundary firing count cannot be negative")
+
+
+@dataclass(frozen=True)
 class Descriptor:
     """Where an agent sits in behaviour space.
 
@@ -487,6 +543,173 @@ class ArchiveEntry(_UtcTimestampMixin):
 
     def __post_init__(self) -> None:
         self._normalize_timestamps("recorded_at")
+
+
+@dataclass(frozen=True)
+class RecordCoverage:
+    """How much of behaviour space the diversity record holds an entry in.
+
+    Read from the record itself, never from a list kept beside it. It is
+    cumulative over a run: a record never empties a cell, so the figure counts
+    the cells ever reached by an entry it kept, and it is never evidence of how
+    spread out the living population is.
+
+    Attributes:
+        axes: The descriptor names the record bins on, in its order.
+        filled: How many cells hold at least one entry.
+        total: How many cells the record has.
+        histograms: Per axis, in :attr:`axes` order, how many held entries sit
+            at each of that axis's cells.
+
+    Raises:
+        ValueError: If there is not one histogram per axis, if a count is
+            negative, or if the cells filled are not between none and all.
+    """
+
+    axes: tuple[str, ...]
+    filled: int
+    total: int
+    histograms: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(self.histograms) != len(self.axes):
+            raise ValueError(
+                f"{len(self.histograms)} histograms for {len(self.axes)} axes; "
+                "every axis has exactly one"
+            )
+        if any(count < 0 for counts in self.histograms for count in counts):
+            raise ValueError("a cell cannot hold a negative number of entries")
+        if not 0 <= self.filled <= self.total:
+            raise ValueError(
+                f"{self.filled} of {self.total} cells filled; a record fills "
+                "between none of its cells and all of them"
+            )
+
+
+@dataclass(frozen=True)
+class RecordPayload:
+    """A diversity record as it is persisted, inside the envelope that says whose it is.
+
+    The envelope names everything a restore must agree with before it loads a
+    single entry: the version of this payload's layout, the run that wrote it,
+    the descriptor vocabulary, and the record's axes, cells per axis and cell
+    capacity. Each entry is held as text, so the payload refers to no live
+    object and restoring it is a decoding, not a copy.
+
+    Attributes:
+        payload_version: Version of the payload's layout.
+        run_id: The run that wrote it, and the only run it restores into.
+        descriptor_schema_version: The vocabulary every entry is described in.
+        axes: The descriptor names the record bins on, in its order.
+        bins: Cells per axis, in :attr:`axes` order.
+        bin_capacity: How many entries one cell holds.
+        entries: Each held entry, encoded, in the order the record holds them.
+    """
+
+    payload_version: str
+    run_id: str
+    descriptor_schema_version: str
+    axes: tuple[str, ...]
+    bins: tuple[int, ...]
+    bin_capacity: int
+    entries: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FitnessSample:
+    """One agent's own evidence, handed in to be deflated against its rivals'.
+
+    Attributes:
+        agent_id: The agent the evidence belongs to.
+        outcomes: The window of per-bar outcomes of the agent's own evaluation
+            account, in bar order. Read as handed in; nothing is filled.
+        independent_outcomes: How many of those outcomes are independent of one
+            another — fewer than the window where outcomes overlap — and so how
+            much evidence the window really carries.
+    """
+
+    agent_id: AgentId
+    outcomes: tuple[float, ...]
+    independent_outcomes: int
+
+
+@dataclass(frozen=True)
+class DeflatedFitness:
+    """One agent's figure, deflated for the comparison it was part of.
+
+    The undeflated figure travels beside the deflated one so the size of the
+    deflation is read rather than reasoned about, and the standing is the
+    deflator's verdict rather than something a reader infers by comparing
+    figures — inferring it would be computing a statistic of one's own.
+
+    A figure that is ``None`` means the agent was not assessed. It is never a
+    number in waiting: nothing is substituted for it, and a reader orders on
+    ``deflated`` only where it is present
+    (``plans/oracle-v3-unassessed-fitness-2026-10-01.md``).
+
+    Attributes:
+        agent_id: The agent the figure belongs to.
+        undeflated: The agent's per-period figure, before any deflation, or
+            ``None`` where there is no per-period figure for the window.
+        deflated: The figure the population is ordered by, deflated for how
+            many agents were compared and how much independent evidence this
+            one has, or ``None`` where the deflator could not assess the agent.
+        compared: How many agents the figure was deflated against, this one
+            included.
+        independent_outcomes: The independent-outcome count the figure rests
+            on, as the sample stated it.
+        standing: Whether the figure is told apart from the population's at the
+            deflator's declared confidence, and in which direction. An agent
+            that was not assessed is ``"indistinguishable"``.
+    """
+
+    agent_id: AgentId
+    undeflated: float | None
+    deflated: float | None
+    compared: int
+    independent_outcomes: int
+    standing: Standing
+
+    @property
+    def assessed(self) -> bool:
+        """Whether the deflator returned a figure for this agent."""
+        return self.deflated is not None
+
+    def __post_init__(self) -> None:
+        """Refuse a verdict no reader could act on without guessing.
+
+        Raises:
+            ValueError: If the standing is not one of the three a deflator may
+                give, if a figure is present and not finite, if an agent with no
+                deflated figure is told apart in either direction, or if a
+                deflated figure is present without the figure it deflates.
+        """
+        if self.standing not in get_args(Standing.__value__):
+            raise ValueError(
+                "a standing must be one of worse, indistinguishable or better; "
+                f"got {self.standing!r}"
+            )
+        for name, figure in (
+            ("undeflated", self.undeflated),
+            ("deflated", self.deflated),
+        ):
+            if figure is not None and not math.isfinite(figure):
+                raise ValueError(
+                    f"a present {name} figure must be finite, got {figure!r}: "
+                    "an agent that was not assessed carries None, never a "
+                    "number standing in for one"
+                )
+        if self.deflated is None and self.standing != "indistinguishable":
+            raise ValueError(
+                "an agent the deflator could not assess must be "
+                f"indistinguishable, got {self.standing!r}: an agent nobody "
+                "assessed is told apart from nobody"
+            )
+        if self.undeflated is None and self.deflated is not None:
+            raise ValueError(
+                "a deflated figure needs an undeflated one: nothing is deflated "
+                "from a figure that does not exist"
+            )
 
 
 @dataclass(frozen=True)

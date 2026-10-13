@@ -130,6 +130,11 @@ class _EvaluationAccount:
 
     Mutable and private. Everything it hands out is an immutable value; what is held here is the running state a walk advances one decision
     point at a time, which is exactly the state the port contract says is handed in and handed back rather than kept by a provider.
+
+    It does not advance itself. :class:`~liq.evolution.ecology.population_accounts.PopulationAccounts` is the one driver of every account,
+    a lone agent's included: the previous outcome is delivered before anything acts, what was held is carried into the open, the target formed
+    a bar ago is acted on and charged there, what is then held is carried to the close, the account is published, and only then is the next
+    target formed. The settle-then-decide half of that order is the shared step's; the accounting in between is this account's own.
     """
 
     agent: IntentFormer
@@ -146,27 +151,6 @@ class _EvaluationAccount:
     fills: list[Fill | NotFilled] = field(default_factory=list)
     rejections: list[Rejection] = field(default_factory=list)
     events: list[AccountEvent] = field(default_factory=list)
-
-    def visit(self, window: BarWindow) -> None:
-        """
-        Advance the account through one decision point, in order.
-
-        The order is the accounting: the previous outcome is delivered before anything acts, what was held is carried into the open, the target
-        formed a bar ago is acted on and charged there, what is then held is carried to the close, the account is published, and only then is the
-        next target formed. The settle-then-decide half of that order is the shared step's, so an account and anything that walks the rule
-        without one take decision points the same way; the accounting in between is this account's own.
-        """
-        bar = self._priced(window)
-        self._record_what_the_updates_consumed(window.as_of)
-        self.step.take(
-            window,
-            bar,
-            settle=self.agent.observe,
-            meanwhile=lambda: self._account_for_the_bar(bar, window.as_of),
-            decide=lambda: self._form_the_target_the_next_bar_acts_on(
-                window, self.states[-1]
-            ),
-        )
 
     def _account_for_the_bar(self, bar: Bar, as_of: UtcTimestamp) -> None:
         """Carry into the open, act on last bar's target, carry to the close, publish."""
@@ -268,6 +252,41 @@ class _EvaluationAccount:
         )
         self.rejections.extend(sized.rejections)
         self.pending = sized.target
+
+    def close(self, as_of: UtcTimestamp) -> None:
+        """
+        Hold a flat target for the next bar: the one exit every death takes.
+
+        Called when the agent dies at decision point ``as_of``. The flat target is formed there and acted on at the bar that follows, exactly as any
+        target formed at a decision point is, so the exposure is closed through the execution model and charged under the scenario it was handed,
+        once, and the close is never acted on at a price that printed before the death was decided. Whatever decided the death is not consulted:
+        a cull and a retirement close alike, because why an agent died is a label on its record and never a branch in its accounting. A target is
+        held even where nothing is open, and the execution model then says nothing traded.
+        """
+        self.pending = PositionTarget(
+            agent_id=self.agent.agent_id,
+            instrument=self.instrument,
+            target_exposure=FLAT,
+            as_of=as_of,
+        )
+
+    def opened_at(self, as_of: UtcTimestamp) -> None:
+        """Publish the account as it opens, at the instant its agent was born."""
+        self._publish(as_of)
+
+    def evaluation(self, history: WalkReport, *, opening_equity: float) -> Evaluation:
+        """The account as it stands, with what it opened with and the walk it was advanced over."""
+        return Evaluation(
+            agent_id=self.agent.agent_id,
+            instrument=self.instrument,
+            cost_scenario_id=self.simulator.cost_scenario_id,
+            opening_equity=opening_equity,
+            states=tuple(self.states),
+            fills=tuple(self.fills),
+            rejections=tuple(self.rejections),
+            events=tuple(self.events),
+            history=history,
+        )
 
     def _publish(self, as_of: UtcTimestamp) -> AccountState:
         """Record and return the account as of one decision point."""

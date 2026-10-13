@@ -116,8 +116,10 @@ from .agent_contracts import (
     AgentSnapshot,
     AgentVersions,
     BoundReached,
+    DeathKind,
     FeatureNotFinite,
     ForgettingFactorOutsideItsRange,
+    LearnedStateDisposition,
     Lineage,
     NothingWasShown,
     OutcomeFromTheSameBar,
@@ -126,6 +128,7 @@ from .agent_contracts import (
     PopulationDoesNotLearn,
     PopulationSnapshot,
     PopulationStep,
+    ReadingAwaitsItsOutcome,
     StartingStateOutsideItsBound,
     StorageReport,
 )
@@ -144,6 +147,7 @@ from .population_construction import _ConstructionMixin
 from .population_decisions import _DecisionsMixin
 from .population_observations import _ObservationsMixin
 from .population_snapshot import _SnapshotMixin
+from .population_turnover import _TurnoverMixin
 
 __all__ = [
     "ENTRY_THRESHOLD",
@@ -159,8 +163,10 @@ __all__ = [
     "AgentSnapshot",
     "AgentVersions",
     "BoundReached",
+    "DeathKind",
     "FeatureNotFinite",
     "ForgettingFactorOutsideItsRange",
+    "LearnedStateDisposition",
     "Lineage",
     "NothingWasShown",
     "OutcomeFromTheSameBar",
@@ -170,6 +176,7 @@ __all__ = [
     "PopulationSnapshot",
     "PopulationState",
     "PopulationStep",
+    "ReadingAwaitsItsOutcome",
     "StartingStateOutsideItsBound",
     "StorageReport",
 ]
@@ -181,6 +188,7 @@ class PopulationState(
     _DecisionsMixin,
     _ObservationsMixin,
     _SnapshotMixin,
+    _TurnoverMixin,
 ):
     """Every living agent, held as arrays, with each part addressable on its own.
 
@@ -189,6 +197,10 @@ class PopulationState(
     :meth:`restored`, from a snapshot, which is how a run resumes. Both go
     through the same construction, so a restored population cannot be a
     differently-shaped thing that happens to answer the same questions.
+    Once it exists, who is alive in it changes by :meth:`admit` and
+    :meth:`cull`, between an outcome and the next decision point; an admission
+    goes through the same birth rule as :meth:`founded`, and neither rebuilds
+    the arrays.
 
     The gene columns are laid out so that stepping reads slices rather than
     gathers: every ``mask.`` gene first, in feature order, then every
@@ -211,8 +223,10 @@ for _public_type in (
     AgentSnapshot,
     AgentVersions,
     BoundReached,
+    DeathKind,
     FeatureNotFinite,
     ForgettingFactorOutsideItsRange,
+    LearnedStateDisposition,
     Lineage,
     NothingWasShown,
     OutcomeFromTheSameBar,
@@ -222,6 +236,7 @@ for _public_type in (
     PopulationSnapshot,
     PopulationStep,
     PopulationState,
+    ReadingAwaitsItsOutcome,
     StartingStateOutsideItsBound,
     StorageReport,
 ):

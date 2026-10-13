@@ -31,14 +31,27 @@ class _PopulationStateFields(ABC):
     _learned_at: dict[str, int]
     _entry_at: int
     _features: int
+    # The living rows of each store, ``store[:len(_ids)]``: views, never
+    # copies, so everything that steps the population writes the store.
     _genes: np.ndarray
     _learned: np.ndarray
     _intended: np.ndarray
     _realised: np.ndarray
     _history: np.ndarray
     _retained: np.ndarray
-    _lineage: tuple[Lineage, ...]
-    _versions: tuple[AgentVersions, ...]
+    _exposures: np.ndarray
+    _exposures_retained: np.ndarray
+    # The population's reference-return history: one row for everyone, so it
+    # is held beside the per-agent stores rather than in them.
+    _reference: np.ndarray
+    _reference_retained: int
+    _stores: dict[str, np.ndarray]
+    _capacity: int
+    _reallocations: int
+    _lineage_of: dict[AgentId, Lineage]
+    _departed: list[AgentId]
+    _refusals: int
+    _versions: list[AgentVersions]
     _born_under: set[str]
     learning: LearningConfig | None
     _update: online.OnlineUpdate | None
@@ -53,6 +66,22 @@ class _PopulationStateFields(ABC):
     def _admit(self, row: int, held: AgentSnapshot) -> None: ...
 
     @abstractmethod
+    def _refuse_a_misfit(self, held: AgentSnapshot) -> None: ...
+
+    @abstractmethod
+    def _allocate(self, capacity: int) -> None: ...
+
+    @abstractmethod
+    def _refuse_rates_outside_the_range(
+        self, rates: np.ndarray, ids: tuple[AgentId, ...]
+    ) -> None: ...
+
+    @abstractmethod
+    def _refuse_a_start_outside_the_bound(
+        self, learned: np.ndarray, carried: np.ndarray, ids: tuple[AgentId, ...]
+    ) -> None: ...
+
+    @abstractmethod
     def genome(self, agent_id: AgentId) -> Genome: ...
 
     @abstractmethod
@@ -62,6 +91,12 @@ class _PopulationStateFields(ABC):
     def history(self, agent_id: AgentId) -> tuple[float, ...]: ...
 
     @abstractmethod
+    def exposures(self, agent_id: AgentId) -> tuple[float, ...]: ...
+
+    @abstractmethod
+    def reference_returns(self) -> tuple[float, ...]: ...
+
+    @abstractmethod
     def _forgetting(self) -> np.ndarray: ...
 
     @abstractmethod
@@ -69,6 +104,9 @@ class _PopulationStateFields(ABC):
 
     @abstractmethod
     def _refuse_a_vocabulary_nobody_was_born_under(self, window: BarWindow) -> None: ...
+
+    @abstractmethod
+    def _hold_the_reference_returns(self, returns: tuple[float, ...]) -> None: ...
 
     @abstractmethod
     def _resume_pending(

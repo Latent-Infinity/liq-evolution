@@ -13,6 +13,12 @@ are not a fixture, and no number computed from them is evidence of anything. A
 real bar source reads real history through the platform's data layer; this one
 exists only so a suite can check the shape of the contract without one.
 
+:class:`NullFitnessDeflator` likewise deflates nothing and claims nothing: it
+reports each agent's mean outcome as both figures and tells no agent apart, so a
+loop wired to it can retire by age but never cull on a figure nobody deflated.
+The deflation itself belongs to the platform's statistics authority, reached
+only from the consumer that composes a run.
+
 For the same reason :class:`NullExecutionSimulator` charges nothing by default.
 A cost belongs to the cost scenario its adapter was configured with, and a
 stand-in must not put a plausible-looking number where a resolved cost belongs.
@@ -23,6 +29,7 @@ here rather than only behind a provider.
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -30,6 +37,11 @@ from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import ClassVar
 
+from liq.evolution.ecology.adapters import archive_codec
+from liq.evolution.ecology.ports import (
+    refuse_an_unanswerable_selection,
+    refuse_an_undeflatable_sample,
+)
 from liq.evolution.ecology.types import (
     AccountState,
     AgentId,
@@ -38,14 +50,19 @@ from liq.evolution.ecology.types import (
     BarWindow,
     CostProvenance,
     CostScenarioId,
+    DeflatedFitness,
     Descriptor,
     Fill,
+    FitnessSample,
     Genome,
     InstrumentId,
     Intent,
     NotFilled,
     NullDeclaration,
+    Offspring,
     PositionTarget,
+    RecordCoverage,
+    RecordPayload,
     Rejection,
     SegmentRole,
     SizingOutcome,
@@ -57,6 +74,7 @@ __all__ = [
     "NullAgentPopulation",
     "NullBarSource",
     "NullExecutionSimulator",
+    "NullFitnessDeflator",
     "NullRiskSizer",
     "NullSurrogateSource",
 ]
@@ -81,6 +99,19 @@ _ORIGIN = datetime(2000, 1, 1, tzinfo=UTC)
 # fraction of notional once divided by this.
 _SIDES_PER_ROUND_TRIP = 2
 _BASIS_POINTS_PER_UNIT = 10_000.0
+
+# The stand-ins' declared floors (plans/oracle-v3-unassessed-fitness-2026-10-01.md
+# §3.2-§3.3). A uniform draw can choose among a single agent with a figure, and a
+# mean asks nothing of a window beyond the two outcomes the deflation port
+# already refuses below.
+_FEWEST_TO_DRAW_FROM = 1
+_PORT_WINDOW_FLOOR = 2
+
+# The stand-in population's one descriptor, and its record's coarse cells: a
+# value is placed at its nearest tenth, so the unit interval has eleven cells.
+_ACTIVITY = "activity"
+_TENTHS = 10
+_CELLS_PER_AXIS = _TENTHS + 1
 
 
 @dataclass(frozen=True)
@@ -373,9 +404,17 @@ class NullAgentPopulation:
     Each agent's heritable genes and its learned state are held apart, so a
     birth can carry one without the other. An offspring is the mean of its
     parents' genes with a seeded perturbation, which makes spawning
-    reproducible without making it trivial. The record keeps one entry per
-    coarse descriptor cell and replaces an incumbent only when the entry
-    offered scores higher.
+    reproducible without making it trivial; the perturbation's half-width is
+    reported as the scale in force, and no boundary rule exists here to fire.
+    Parents are drawn uniformly, with replacement, from the agents carrying a
+    figure, or from the living when none does — a stand-in that prefers nobody,
+    so no selection pressure is implied by it. One figure is enough to choose
+    among, so its ``minimum_candidates`` is one. The record
+    keeps one entry per coarse descriptor cell and replaces an incumbent only
+    when the entry offered scores higher. A coordinate outside the unit
+    interval, or not a number, is an exclusion, kept aside. The record persists
+    and restores through the same codec and envelope as the platform-backed
+    one, so the two are held to one persistence contract.
 
     Attributes:
         agent_count: How many agents are alive.
@@ -393,6 +432,7 @@ class NullAgentPopulation:
     _learned: dict[AgentId, Mapping[str, float]] = field(init=False, repr=False)
     _descriptors: dict[AgentId, Descriptor] = field(init=False, repr=False)
     _archive: dict[tuple[float, ...], ArchiveEntry] = field(init=False, repr=False)
+    _excluded: list[ArchiveEntry] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Populate the living agents and start with an empty record."""
@@ -419,6 +459,12 @@ class NullAgentPopulation:
             for index, agent_id in enumerate(ids)
         }
         self._archive = {}
+        self._excluded = []
+
+    @property
+    def minimum_candidates(self) -> int:
+        """One: a uniform draw can choose among a single agent with a figure."""
+        return _FEWEST_TO_DRAW_FROM
 
     def agent_ids(self) -> tuple[AgentId, ...]:
         """Return the identities of the living agents."""
@@ -436,8 +482,8 @@ class NullAgentPopulation:
         """Return where one agent currently sits in behaviour space."""
         return self._descriptors[agent_id]
 
-    def spawn(self, *, parents: Sequence[AgentId], seed: int) -> Genome:
-        """Return one offspring genome of ``parents``, with variation applied."""
+    def spawn(self, *, parents: Sequence[AgentId], seed: int) -> Offspring:
+        """Return one offspring of ``parents``, with the variation it applied."""
         lineage = [self._genomes[agent_id] for agent_id in parents]
         rng = random.Random(seed)
         genes = {
@@ -445,23 +491,104 @@ class NullAgentPopulation:
             + rng.uniform(-self.variation, self.variation)
             for name in sorted(lineage[0].genes)
         }
-        return Genome(
-            genes=MappingProxyType(genes),
-            schema_version=lineage[0].schema_version,
+        return Offspring(
+            genome=Genome(
+                genes=MappingProxyType(genes),
+                schema_version=lineage[0].schema_version,
+            ),
+            mutation_scale=self.variation or None,
+            boundary_firings=MappingProxyType(dict.fromkeys(genes, 0)),
         )
 
+    def select_parents(
+        self, *, fitness: Mapping[AgentId, float | None], count: int, seed: int
+    ) -> tuple[AgentId, ...]:
+        """Return ``count`` parents, drawn uniformly and reproducibly.
+
+        Drawn from the agents carrying a figure, or from the living when none
+        does; an agent handed in as ``None`` is otherwise never chosen.
+        """
+        living = self.agent_ids()
+        refuse_an_unanswerable_selection(
+            fitness=fitness,
+            living=living,
+            count=count,
+            minimum=self.minimum_candidates,
+        )
+        candidates = [agent_id for agent_id in living if fitness[agent_id] is not None]
+        return tuple(random.Random(seed).choices(candidates or living, k=count))
+
     def record(self, entry: ArchiveEntry) -> bool:
-        """Offer ``entry`` to the diversity record; report whether it was kept."""
+        """Offer ``entry`` to the diversity record; report whether it was kept.
+
+        A coordinate outside the unit interval, or not a number, is excluded.
+        """
+        if not all(0.0 <= value <= 1.0 for value in entry.descriptor.values.values()):
+            self._excluded.append(entry)
+            return False
+        return self._keep(entry)
+
+    def recorded(self) -> tuple[ArchiveEntry, ...]:
+        """Return the entries the diversity record currently holds."""
+        return tuple(self._archive.values())
+
+    def excluded(self) -> tuple[ArchiveEntry, ...]:
+        """Return every entry refused for a coordinate the record cannot bin."""
+        return tuple(self._excluded)
+
+    def coverage(self) -> RecordCoverage:
+        """Return the coarse cells the record fills, counted from its own cells."""
+        histogram = [0] * _CELLS_PER_AXIS
+        for (value,) in self._archive:
+            histogram[round(value * _TENTHS)] += 1
+        return RecordCoverage(
+            axes=(_ACTIVITY,),
+            filled=len(self._archive),
+            total=_CELLS_PER_AXIS,
+            histograms=(tuple(histogram),),
+        )
+
+    def persisted(self, run_id: str) -> RecordPayload:
+        """Return the record's entries, encoded in its order, inside their envelope."""
+        return RecordPayload(
+            payload_version=archive_codec.PAYLOAD_VERSION,
+            run_id=run_id,
+            descriptor_schema_version=self.descriptor_schema_version,
+            axes=(_ACTIVITY,),
+            bins=(_CELLS_PER_AXIS,),
+            bin_capacity=1,
+            entries=tuple(
+                archive_codec.encode_entry(entry) for entry in self._archive.values()
+            ),
+        )
+
+    def restore(self, payload: RecordPayload, run_id: str) -> None:
+        """Replay ``payload`` into the empty record, for restart of ``run_id``.
+
+        Raises:
+            ValueError: If the payload is not a record of this run in this
+                record's shape, or if the record already holds an entry.
+        """
+        archive_codec.refuse_a_foreign_payload(
+            payload,
+            run_id=run_id,
+            descriptor_schema_version=self.descriptor_schema_version,
+            axes=(_ACTIVITY,),
+            bins=(_CELLS_PER_AXIS,),
+            bin_capacity=1,
+            held=len(self._archive),
+        )
+        for text in payload.entries:
+            self._keep(archive_codec.decode_entry(text))
+
+    def _keep(self, entry: ArchiveEntry) -> bool:
+        """Place ``entry`` in its cell unless the incumbent scores at least as high."""
         cell = self._cell(entry.descriptor)
         incumbent = self._archive.get(cell)
         if incumbent is not None and self._score(incumbent) >= self._score(entry):
             return False
         self._archive[cell] = entry
         return True
-
-    def recorded(self) -> tuple[ArchiveEntry, ...]:
-        """Return the entries the diversity record currently holds."""
-        return tuple(self._archive.values())
 
     @staticmethod
     def _cell(descriptor: Descriptor) -> tuple[float, ...]:
@@ -519,4 +646,38 @@ class NullSurrogateSource:
             replicate=replicate,
             seed=seed,
             values=tuple(reordered),
+        )
+
+
+@dataclass(frozen=True)
+class NullFitnessDeflator:
+    """Deflate nothing, tell nobody apart, and say so.
+
+    Each agent's figure is the mean of its own outcomes, reported as both the
+    undeflated and the deflated figure, and every standing is
+    ``"indistinguishable"``: with no deflation there is no evidence to tell any
+    agent apart with, in either direction. A mean exists for every window the
+    port accepts, so every agent is assessed and ``minimum_window`` is the
+    port's own floor of two. Used by this library's own tests only; a composed
+    run is wired to the platform-backed deflator.
+    """
+
+    @property
+    def minimum_window(self) -> int:
+        """Two: the port's own floor, below which every deflator refuses."""
+        return _PORT_WINDOW_FLOOR
+
+    def deflate(self, samples: Sequence[FitnessSample]) -> tuple[DeflatedFitness, ...]:
+        """Return each sample's mean outcome, undeflated, and claim nothing."""
+        refuse_an_undeflatable_sample(samples)
+        return tuple(
+            DeflatedFitness(
+                agent_id=each.agent_id,
+                undeflated=math.fsum(each.outcomes) / len(each.outcomes),
+                deflated=math.fsum(each.outcomes) / len(each.outcomes),
+                compared=len(samples),
+                independent_outcomes=each.independent_outcomes,
+                standing="indistinguishable",
+            )
+            for each in samples
         )

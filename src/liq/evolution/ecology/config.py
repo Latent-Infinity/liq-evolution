@@ -27,7 +27,9 @@ provenance is worse than one that does not exist.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 __all__ = [
     "DEFAULT_ABSOLUTE_PENALTY",
@@ -42,8 +44,12 @@ __all__ = [
     "STATE_BOUND_KEY",
     "WEIGHT_NORM_BOUND_KEY",
     "EcologyConfig",
+    "Inheritance",
     "LearningConfig",
     "PopulationConfig",
+    "TurnoverConfig",
+    "most_deaths_in_any_span",
+    "most_unripe_at_a_trigger",
 ]
 
 #: The dotted names the two bounds are declared under, as a provenance record
@@ -194,6 +200,169 @@ class LearningConfig:
             )
 
 
+class Inheritance(StrEnum):
+    """What a birth carries across of anything its parent learned.
+
+    The variable the inheritance experiment turns on, so it is configuration
+    and recorded with the run rather than a property of the code of the day.
+    """
+
+    #: The offspring starts from exactly its first parent's whole learned state.
+    LAMARCKIAN = "lamarckian"
+    #: The offspring starts from its own genome's priors, carrying nothing.
+    BALDWINIAN = "baldwinian"
+
+
+def most_deaths_in_any_span(
+    replacement_count: int, trigger_period: int, window: int
+) -> int:
+    """The most deaths a run of ``window`` consecutive decision points can hold.
+
+    Counted over every such run whatever bar it starts at, not over windows
+    aligned to the walk: a run of ``window`` bars holds at most
+    ``ceil(window / trigger_period)`` triggers, and each trigger kills at most
+    ``replacement_count``, whatever decided each death.
+    """
+    return replacement_count * math.ceil(window / trigger_period)
+
+
+def most_unripe_at_a_trigger(
+    replacement_count: int, trigger_period: int, minimum_age: int
+) -> int:
+    """The bound ``k·⌈m/T⌉`` on agents a trigger can find too young to die.
+
+    Every agent born within the last ``minimum_age`` bars is too young, and at
+    most ``replacement_count`` are born at each trigger
+    (``plans/oracle-v3-indistinguishable-cull-2026-09-30.md``, "Whether the death
+    count can be kept independent of the data").
+    """
+    return replacement_count * math.ceil(minimum_age / trigger_period)
+
+
+@dataclass(frozen=True)
+class TurnoverConfig:
+    """How a population that is walking is turned over: who dies, when, and how many.
+
+    Every key is fixture-phase configuration, recorded with the run; none of
+    them is a tuned value, and each is frozen before anything signal-bearing.
+    There is no generation, epoch or replay key: deaths and births happen
+    between bars, at a trigger that is a function of the bar index and these
+    keys alone. Who dies at a trigger is the rule in
+    ``plans/oracle-v3-indistinguishable-cull-2026-09-30.md`` §2.2 and is not
+    configurable; how parents are chosen when too few agents carry a figure is
+    ``plans/oracle-v3-unassessed-fitness-2026-10-01.md`` §2.2, whose threshold
+    is the population port's own floor and not a key here.
+
+    Attributes:
+        band_lower: The fewest agents the population may hold.
+        band_upper: The most.
+        replacement_count: How many eligible agents die at each trigger — a
+            count, not a ceiling the loop may fall short of.
+        trigger_period: How many decision points apart triggers fall. A
+            trigger falls at every positive multiple of it.
+        minimum_age: How many decision points an agent must have lived before
+            it may die.
+        replacement_window: The length, in decision points, of the runs the
+            replaced fraction is bounded over.
+        maximum_replaced_fraction: The most of those living at a run's start
+            that the run may replace, whatever decided each death.
+        fitness_window: How many of an agent's most recent outcomes the
+            deflation is handed.
+        parents_per_birth: How many parents each birth is drawn from.
+        inheritance: What a birth carries across of its parent's learning.
+        admission_redraws: How many times a birth refused at admission is
+            drawn again, from fresh parents, before it is lost.
+        seed: The root of every seed a selection or a birth is drawn under.
+
+    Raises:
+        ValueError: If a count is not positive where it must be, the band is
+            empty, the fraction is outside (0, 1), a trigger could replace the
+            whole population at once, the eligible pool could fall short of
+            the replacement count after warm-up, a run of the window's length
+            could replace more than its fraction, or the inheritance setting is
+            not one that exists.
+    """
+
+    band_lower: int
+    band_upper: int
+    replacement_count: int
+    trigger_period: int
+    minimum_age: int
+    replacement_window: int
+    maximum_replaced_fraction: float
+    fitness_window: int
+    parents_per_birth: int
+    inheritance: Inheritance
+    admission_redraws: int
+    seed: int
+
+    def __post_init__(self) -> None:
+        """Refuse a turnover the records rule out, before anything runs."""
+        self._refuse_counts_that_count_nothing()
+        try:
+            object.__setattr__(self, "inheritance", Inheritance(self.inheritance))
+        except ValueError:
+            raise ValueError(
+                f"inheritance {self.inheritance!r} is not one of "
+                f"{[member.value for member in Inheritance]}"
+            ) from None
+        if self.band_lower > self.band_upper:
+            raise ValueError(
+                f"the band [{self.band_lower}, {self.band_upper}] is empty"
+            )
+        if not 0.0 < self.maximum_replaced_fraction < 1.0:
+            raise ValueError(
+                "the maximum replaced fraction must lie strictly inside (0, 1); "
+                f"it was {self.maximum_replaced_fraction}"
+            )
+        if self.replacement_count >= self.band_lower:
+            raise ValueError(
+                f"{self.replacement_count} deaths at a trigger could replace the "
+                f"whole population of {self.band_lower} at once"
+            )
+        unripe = most_unripe_at_a_trigger(
+            self.replacement_count, self.trigger_period, self.minimum_age
+        )
+        if self.band_lower < unripe:
+            raise ValueError(
+                f"the band's lower bound {self.band_lower} is below k·⌈m/T⌉ = "
+                f"{unripe}, so the eligible pool could fall short of the "
+                "replacement count after warm-up and turnover would stall"
+            )
+        most = most_deaths_in_any_span(
+            self.replacement_count, self.trigger_period, self.replacement_window
+        )
+        if most > self.maximum_replaced_fraction * self.band_lower:
+            raise ValueError(
+                f"a run of {self.replacement_window} decision points can hold "
+                f"{most} deaths, more than the maximum replaced fraction "
+                f"{self.maximum_replaced_fraction} of {self.band_lower} living"
+            )
+
+    def _refuse_counts_that_count_nothing(self) -> None:
+        for name in (
+            "band_lower",
+            "replacement_count",
+            "trigger_period",
+            "replacement_window",
+            "fitness_window",
+            "parents_per_birth",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(
+                    f"{name} must be at least one; it was {getattr(self, name)}"
+                )
+        for name in ("minimum_age", "admission_redraws"):
+            if getattr(self, name) < 0:
+                raise ValueError(
+                    f"{name} cannot be negative; it was {getattr(self, name)}"
+                )
+
+    def fires(self, index: int) -> bool:
+        """Whether a trigger falls at decision point ``index``: bar index and keys only."""
+        return index > 0 and index % self.trigger_period == 0
+
+
 @dataclass(frozen=True)
 class EcologyConfig:
     """How one pass over history is driven.
@@ -210,6 +379,8 @@ class EcologyConfig:
             flattened in here, so a provenance record carries each quantity
             under a name that says which part of the run it turns.
         learning: What the online update is turned by.
+        turnover: How the population is turned over while it walks, or ``None``
+            for a pass in which nobody is born or dies.
 
     Raises:
         ValueError: If the pass could not be identified, or asks for a
@@ -220,6 +391,7 @@ class EcologyConfig:
     window_carries_across_segments: bool = True
     population: PopulationConfig = field(default_factory=PopulationConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    turnover: TurnoverConfig | None = None
 
     def __post_init__(self) -> None:
         """Refuse a pass that cannot be named or asks for what does not exist."""

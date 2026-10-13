@@ -23,10 +23,11 @@ feature vocabulary it was born under. A snapshot that lost or garbled any of
 the first three is caught behaviourally, and the proof that each is caught is
 run below rather than argued; the fourth is not a divergence but a refusal, and
 the refusing is checked where the refusal lives rather than here. What is left
-outside the trajectory is the outcome history and the lineage: nothing steps on
-either, so a snapshot that dropped one would produce an identical trajectory
-and is caught here only by the round-trip assertions, which are the weaker kind
-of evidence.
+outside the trajectory is the outcome history, the lineage, and the two
+histories the descriptors read — each agent's realised exposures and the
+population's reference returns: nothing steps on any of them, so a snapshot
+that dropped one would produce an identical trajectory and is caught here only
+by the round-trip assertions, which are the weaker kind of evidence.
 
 The learned half was owed until the decision rule read what an agent had
 learned, and it is owed no longer. The wish is now formed from the learned
@@ -47,10 +48,17 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import MappingProxyType
 
-from liq.evolution.ecology import Genome, adapters, agent, config, learning
+from liq.evolution.ecology import (
+    Genome,
+    adapters,
+    agent,
+    config,
+    genome_schema,
+    learning,
+)
 
 #: Vocabulary the genes below belong to.
-GENE_SCHEMA_VERSION = "state-genes-1"
+GENE_SCHEMA_VERSION = genome_schema.SCHEMA_VERSION
 
 #: Vocabulary the feature names below belong to. The decision points are
 #: stamped with it too, so no agent here is evaluated under a vocabulary it was
@@ -261,6 +269,8 @@ def _walk(
         for agent_id, wanted in zip(step.agent_ids, step.wanted, strict=True):
             state.hold(agent_id, wanted)
             state.record_outcome(agent_id, wanted)
+        if from_index + offset > 0:
+            state.record_reference_return(_reference(from_index + offset, instrument))
         earned = dict.fromkeys(step.agent_ids, _earned(from_index + offset))
         state.observe(window.as_of + OUTCOME_KNOWN_AFTER, earned)
         trajectory.append(
@@ -273,6 +283,26 @@ def _walk(
             )
         )
     return tuple(trajectory)
+
+
+def _reference(index: int, instrument: str) -> float:
+    """The ramp's close-to-close return into decision point ``index``.
+
+    What the accounting step writes to the population's reference history once
+    per decision point after the first; here it is written by the walk above,
+    which stands in for the accounting step, so the round trip below has a
+    reference history to carry.
+    """
+    ramp = _decision_points()
+    return (
+        ramp[index].bars[instrument].close / ramp[index - 1].bars[instrument].close
+        - 1.0
+    )
+
+
+def _bits(values: tuple[float, ...]) -> tuple[str, ...]:
+    """Values as their exact bit patterns, so equality is bit-for-bit."""
+    return tuple(float(value).hex() for value in values)
 
 
 def test_genome_and_learned_state_separable() -> None:
@@ -305,7 +335,7 @@ def test_genome_and_learned_state_separable() -> None:
     assert dict(population.genome(first).genes) == inherited
     assert dict(population.genome(first).genes) != dict(population.genome(second).genes)
 
-    offspring = population.spawn(parents=(first, second), seed=17)
+    offspring = population.spawn(parents=(first, second), seed=17).genome
     assert set(offspring.genes) == set(inherited)
     assert OBSERVED not in offspring.genes
 
@@ -420,6 +450,29 @@ def test_snapshot_restore_preserves_behaviour() -> None:
     )
     for agent_id, intended in wanted_there.items():
         assert restored_at_the_snapshot.intended(agent_id) == intended
+
+    # The two bounded histories the descriptors read are carried too, bit for
+    # bit: each agent's realised exposures and the population's reference
+    # returns (plans/oracle-v4-descriptor-axes-2026-10-02.md §5.1). Nothing
+    # steps on either, so no trajectory could see one lost; and each is
+    # required to hold more than one value, so a snapshot that dropped one, or
+    # restored it as a constant, would drop something.
+    references = put_away.reference_returns
+    assert len(set(references)) > 1, (
+        "the reference history is constant where the population is put away"
+    )
+    assert _bits(restored_at_the_snapshot.reference_returns()) == _bits(references)
+    for held in put_away.agents:
+        assert len(set(held.exposures)) > 1, (
+            f"{held.agent_id!r} held one exposure throughout, so a lost history "
+            "would be indistinguishable from a constant one"
+        )
+        assert _bits(restored_at_the_snapshot.exposures(held.agent_id)) == _bits(
+            held.exposures
+        )
+    for agent_id in live.agent_ids():
+        assert _bits(restored.exposures(agent_id)) == _bits(live.exposures(agent_id))
+    assert _bits(restored.reference_returns()) == _bits(live.reference_returns())
 
 
 def _stepped(
