@@ -30,6 +30,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Literal, get_args
 
 __all__ = [
     "DEFAULT_ABSOLUTE_PENALTY",
@@ -41,6 +42,7 @@ __all__ = [
     "DEFAULT_STEP_OFFSET",
     "DEFAULT_STEP_SCALE",
     "DEFAULT_WEIGHT_NORM_BOUND",
+    "DiversityRecord",
     "STATE_BOUND_KEY",
     "WEIGHT_NORM_BOUND_KEY",
     "EcologyConfig",
@@ -363,6 +365,14 @@ class TurnoverConfig:
         return index > 0 and index % self.trigger_period == 0
 
 
+#: What the loop does with the population's diversity record: offer it nothing,
+#: the default; or offer it, at every trigger, the agents that trigger's deflation
+#: assessed and the population can describe, and report what it holds
+#: (``liq-docs/plans/oracle-v4-offers-under-no-rule-2026-10-13.md``). Neither is
+#: a niching rule; no value here acts on the living.
+type DiversityRecord = Literal["none", "record_only"]
+
+
 @dataclass(frozen=True)
 class EcologyConfig:
     """How one pass over history is driven.
@@ -381,10 +391,21 @@ class EcologyConfig:
         learning: What the online update is turned by.
         turnover: How the population is turned over while it walks, or ``None``
             for a pass in which nobody is born or dies.
+        diversity_record: ``"none"``, the default, offers the population's
+            diversity record nothing; ``"record_only"`` offers it, at every
+            trigger, the agents that trigger's deflation assessed and the
+            population can describe, and reports what it holds beside where
+            the living sit. Nothing the loop decides reads the record under
+            either.
+        record_carries_across_segments: Whether the diversity record survives
+            a walk-forward split boundary. Carrying it is the only reading
+            implemented, under either value of ``diversity_record``; it is
+            carried here for the reason ``window_carries_across_segments`` is.
 
     Raises:
-        ValueError: If the pass could not be identified, or asks for a
-            discontinuity at split boundaries that nothing implements.
+        ValueError: If the pass could not be identified, asks for a
+            discontinuity at split boundaries that nothing implements, or
+            names a use of the diversity record that does not exist.
     """
 
     run_id: str
@@ -392,6 +413,8 @@ class EcologyConfig:
     population: PopulationConfig = field(default_factory=PopulationConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     turnover: TurnoverConfig | None = None
+    diversity_record: DiversityRecord = "none"
+    record_carries_across_segments: bool = True
 
     def __post_init__(self) -> None:
         """Refuse a pass that cannot be named or asks for what does not exist."""
@@ -406,4 +429,16 @@ class EcologyConfig:
                 "history to restart at a walk-forward split boundary; nothing "
                 "implements that, and accepting the setting would record a policy "
                 "in provenance that the run did not follow"
+            )
+        if self.diversity_record not in get_args(DiversityRecord.__value__):
+            raise ValueError(
+                f"diversity_record {self.diversity_record!r} is not one of "
+                f"{list(get_args(DiversityRecord.__value__))}"
+            )
+        if not self.record_carries_across_segments:
+            raise ValueError(
+                "record_carries_across_segments=False asks for the diversity record "
+                "to be reset at a walk-forward split boundary; nothing implements "
+                "that, and accepting the setting would record a policy in "
+                "provenance that the run did not follow"
             )

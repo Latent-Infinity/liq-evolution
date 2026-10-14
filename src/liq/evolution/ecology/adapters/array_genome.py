@@ -161,6 +161,7 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Descriptor,
     Genome,
+    LivingOccupancy,
     Offspring,
     RecordCoverage,
     RecordPayload,
@@ -636,6 +637,39 @@ class ArrayGenomePopulation:
     def excluded(self) -> tuple[ArchiveEntry, ...]:
         """Return every entry refused for a coordinate the archive cannot bin."""
         return tuple(self._excluded)
+
+    def occupancy(self) -> LivingOccupancy:
+        """Return the cells the living occupy, binned by the platform archive's own rule.
+
+        Each living agent's descriptor is placed with the archive's public
+        ``cell_of``, which inserts nothing; the record's entries are never read.
+        """
+        axes = self._axes
+        cells: set[tuple[int, ...]] = set()
+        undescribed = excluded = 0
+        for agent_id in self.agent_ids():
+            try:
+                descriptor = self.descriptor(agent_id)
+            except declared_axes.DescriptorUnavailable:
+                undescribed += 1
+                continue
+            try:
+                cells.add(
+                    self.archive.cell_of(
+                        tuple(descriptor.values[axis] for axis in axes)
+                    )
+                )
+            except ValueError:
+                # Outside the archive's bounds, NaN included: in no cell.
+                excluded += 1
+        return LivingOccupancy(
+            axes=axes,
+            occupied=len(cells),
+            total=self.archive.total_bins,
+            described=len(self.agent_ids()) - undescribed - excluded,
+            undescribed=undescribed,
+            excluded=excluded,
+        )
 
     def coverage(self) -> RecordCoverage:
         """Return the cells the platform's archive fills, from its own report."""

@@ -35,6 +35,7 @@ __all__ = [
     "Genome",
     "InstrumentId",
     "Intent",
+    "LivingOccupancy",
     "NotFilled",
     "NullDeclaration",
     "Offspring",
@@ -583,6 +584,51 @@ class RecordCoverage:
             raise ValueError(
                 f"{self.filled} of {self.total} cells filled; a record fills "
                 "between none of its cells and all of them"
+            )
+
+
+@dataclass(frozen=True)
+class LivingOccupancy:
+    """How many of the record's cells the living agents sit in, now.
+
+    Read from the living population under the record's own binning, never from
+    the record: unlike :class:`RecordCoverage` it falls when the living crowd
+    together, so it is the figure that can show a collapse.
+
+    Attributes:
+        axes: The descriptor names the record bins on, in its order.
+        occupied: How many distinct cells hold at least one living agent.
+        total: How many cells the record has.
+        described: Living agents placed in a cell.
+        undescribed: Living agents the population cannot yet describe.
+        excluded: Living agents whose coordinate the record cannot bin; they
+            are in no cell, never clamped into one.
+
+    Raises:
+        ValueError: If a count is negative, if more cells are occupied than
+            there are or than agents were placed, or if agents were placed
+            and no cell is occupied.
+    """
+
+    axes: tuple[str, ...]
+    occupied: int
+    total: int
+    described: int
+    undescribed: int
+    excluded: int
+
+    def __post_init__(self) -> None:
+        if min(self.occupied, self.described, self.undescribed, self.excluded) < 0:
+            raise ValueError("a count of cells or agents cannot be negative")
+        if self.occupied > min(self.total, self.described):
+            raise ValueError(
+                f"{self.occupied} cells occupied by {self.described} placed agents "
+                f"out of {self.total}; no more cells than either"
+            )
+        if self.described and not self.occupied:
+            raise ValueError(
+                f"{self.described} agents placed and no cell occupied; a placed "
+                "agent occupies its cell"
             )
 
 

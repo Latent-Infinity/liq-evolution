@@ -41,15 +41,24 @@ from the population, which records the kind on the lineage, and one account
 close, which knows nothing of the kind. Why an agent died is a label on its
 record and never a branch in its accounting.
 
-*The diversity record.* The loop offers nothing to the population's diversity
-record and reads nothing from it: no birth, death, cull or retirement inserts,
-evicts or consults an entry, so in this loop the interaction between the record
-and a birth or death is none
-(``liq-docs/plans/oracle-v3-archive-offers-2026-10-02.md``). Who offers an entry,
-when and with which figure is decided where the record first acquires a role,
-with the niching descriptors; no figure this loop holds is offered in the
-meantime, because the deflated one is relative to its own trigger's comparison
-and may be absent, and the undeflated one is for reporting.
+*The diversity record.* With the record's offers configured on
+(``diversity_record = "record_only"``), at every trigger, after its one deflate
+call and before its first death, the loop offers the population's diversity
+record one entry for each eligible agent that call assessed and whose descriptor
+is defined, carrying exactly that call's deflated figure under the name
+``"deflated"`` and the agent's genome and descriptor at the trigger; an agent
+without a figure is never offered, and the undeflated figure never is. Nothing
+in the loop reads the record: no birth, death, parent choice or admission
+consults an entry, so discarding every offer changes nothing the loop decides,
+and a cell's occupant — the highest figure offered to it, each relative to its
+own trigger — is a record, not a ranking. An eviction removes an entry, never an
+agent; a death removes an agent, never an entry. The record carries across split
+boundaries and never from one run to another. Its coverage is cumulative and is
+reported beside the living occupancy, which is read from the living and never
+from the record. Configuring the offers on is not niching: no niching rule acts
+on the living. With the offers off (the default) the loop offers nothing
+(``liq-docs/plans/oracle-v4-archive-interaction-2026-10-02.md``;
+``liq-docs/plans/oracle-v4-offers-under-no-rule-2026-10-13.md``).
 
 **What is refused before anything runs.** A configuration whose eligible pool
 could fall short of the replacement count, one that could replace more than its
@@ -66,6 +75,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from liq.evolution.ecology import descriptors as declared_axes
 from liq.evolution.ecology import inheritance
 from liq.evolution.ecology.config import (
     EcologyConfig,
@@ -84,11 +94,14 @@ from liq.evolution.ecology.ports import (
 )
 from liq.evolution.ecology.types import (
     AgentId,
+    ArchiveEntry,
     BarWindow,
     DeflatedFitness,
     FitnessSample,
     Genome,
     InstrumentId,
+    LivingOccupancy,
+    RecordCoverage,
     Standing,
     UtcTimestamp,
 )
@@ -110,7 +123,10 @@ __all__ = [
     "Death",
     "DeathKind",
     "Inheritance",
+    "InitialCoverage",
     "PopulationBandBreached",
+    "RecordOnlyTrigger",
+    "RecordOnlyTurnoverReport",
     "SteadyState",
     "SteadyStateRun",
     "Trigger",
@@ -123,6 +139,10 @@ __all__ = [
 #: spawn at the same trigger never share one.
 _SELECTION = 0
 _SPAWN = 1
+
+#: Why a run reports no initial archive coverage: no trigger offered an entry
+#: (``liq-docs/plans/oracle-v4-archive-interaction-2026-10-02.md`` §2.6).
+NO_OFFERING_TRIGGER = "no agent was both assessed and described"
 
 
 class PopulationBandBreached(EcologyError):
@@ -306,6 +326,107 @@ class Trigger:
 
 
 @dataclass(frozen=True)
+class RecordOnlyTrigger(Trigger):
+    """A trigger with the record's offers on: what it did, and what it offered and read.
+
+    Every field of :class:`Trigger` means what it means there and holds what it
+    would hold with the offers off; the rest is report only, read at one of two
+    instants. The offer counts and ``living_occupancy`` are read at the offer
+    instant, after the trigger's deflate call and before its first death, over
+    the living then, and ``cumulative_coverage`` once the offers are made. The
+    descriptor fields (``described``, ``undescribed``, ``descriptor_exclusions``,
+    ``drift``, ``population_quantiles`` and ``raw_beta``) are one reading taken
+    once the trigger's deaths and births are done, over the living then. So an
+    agent that dies at the trigger is counted in its occupancy and absent from
+    its reading, a newborn is absent from its occupancy and present in its
+    reading, ``described`` and ``living_occupancy.described`` count two
+    populations, and within-life drift never includes the interval in which an
+    agent dies.
+
+    Attributes:
+        segment_id: The walk-forward segment the trigger falls in.
+        offers: Entries offered to the record.
+        offers_kept: Of those, how many the record kept when offered; an entry
+            it evicts later, at this trigger or after, still counts.
+        offers_excluded: Of those, how many it refused for a coordinate it
+            cannot bin.
+        not_offered_descriptor_undefined: Agents the deflation assessed and
+            the population could not describe, so never offered.
+        cumulative_coverage: The record's coverage after the offers, read from
+            the record itself. Cumulative over the run: it counts every cell
+            ever reached and is never evidence of the living's spread.
+        living_occupancy: The cells the living sit in at the offer instant,
+            read from the living and never from the record.
+        described: Living agents with a descriptor at the trigger's reading.
+        undescribed: Living agents short of the descriptor window.
+        descriptor_exclusions: Per axis, per reason, how many described agents
+            carry a value on it no binning accepts.
+        drift: Within-life drift per behavioural axis since the previous
+            trigger's reading, or ``None`` at the run's first reading.
+        population_quantiles: Per behavioural axis, the described population's
+            10th, 50th and 90th percentiles, or ``None`` for an axis nobody
+            has a binnable value on.
+        raw_beta: Each described agent's raw beta estimate, never the clipped one.
+    """
+
+    segment_id: str
+    offers: int
+    offers_kept: int
+    offers_excluded: int
+    not_offered_descriptor_undefined: int
+    cumulative_coverage: RecordCoverage
+    living_occupancy: LivingOccupancy
+    described: int
+    undescribed: int
+    descriptor_exclusions: Mapping[str, Mapping[str, int]]
+    drift: Mapping[str, declared_axes.Drift] | None
+    population_quantiles: Mapping[str, tuple[float, float, float] | None]
+    raw_beta: Mapping[AgentId, float]
+
+
+@dataclass(frozen=True)
+class InitialCoverage:
+    """The record's coverage just after the first trigger that offered it an entry.
+
+    Attributes:
+        trigger: That trigger's row, carrying its index, instant, offers and
+            the living occupancy beside the coverage; ``None`` if no trigger
+            offered an entry.
+        absent: Why there is no initial coverage, or ``None`` if there is one.
+            An empty record is never reported as coverage of nothing.
+
+    Raises:
+        ValueError: Unless exactly one of the two is given.
+    """
+
+    trigger: RecordOnlyTrigger | None
+    absent: str | None
+
+    def __post_init__(self) -> None:
+        if (self.trigger is None) == (self.absent is None):
+            raise ValueError(
+                "initial coverage is either a trigger's or absent with its reason"
+            )
+
+    @property
+    def coverage(self) -> RecordCoverage | None:
+        """The coverage itself, or ``None`` where it is absent."""
+        return None if self.trigger is None else self.trigger.cumulative_coverage
+
+
+@dataclass(frozen=True)
+class _Offers:
+    """What one trigger's offers came to, before its first death."""
+
+    made: int
+    kept: int
+    excluded: int
+    undefined: int
+    occupancy: LivingOccupancy
+    coverage: RecordCoverage
+
+
+@dataclass(frozen=True)
 class BarTurnover:
     """How many were born and died at one decision point."""
 
@@ -342,6 +463,20 @@ class TurnoverReport:
 
 
 @dataclass(frozen=True)
+class RecordOnlyTurnoverReport(TurnoverReport):
+    """A run's turnover with the record's offers on: the report, and its initial coverage.
+
+    Every trigger is a :class:`RecordOnlyTrigger`.
+
+    Attributes:
+        initial_coverage: The record's coverage after its first offering
+            trigger, or absent with the reason.
+    """
+
+    initial_coverage: InitialCoverage
+
+
+@dataclass(frozen=True)
 class SteadyStateRun:
     """One steady-state pass: every account, and what turnover did."""
 
@@ -362,6 +497,10 @@ class SteadyState:
         simulator: The execution model, under its named cost scenario.
         opening_equity: What every account opens with.
         log: Where accounts write what they did.
+        descriptor_declaration: What the population's descriptors are computed
+            under, read at every trigger for the drift and raw beta the record's
+            report carries. Read only with the record's offers on, and required
+            then.
 
     Raises:
         ValueError: If the configuration or the population is one the records
@@ -380,6 +519,7 @@ class SteadyState:
         simulator: ExecutionSimulator,
         opening_equity: float,
         log: RunLog = SILENT,
+        descriptor_declaration: declared_axes.DescriptorDeclaration | None = None,
     ) -> None:
         if config.turnover is None:
             raise ValueError(
@@ -392,6 +532,16 @@ class SteadyState:
         self.state = state
         self.deflator = deflator
         self._refuse_what_the_records_refuse()
+        self._offers_on = config.diversity_record == "record_only"
+        if self._offers_on and descriptor_declaration is None:
+            raise ValueError(
+                'diversity_record = "record_only" reports drift and raw beta at '
+                "every trigger, which are read under the population's descriptor "
+                "declaration; none was given"
+            )
+        self._declaration = descriptor_declaration
+        self._last_reading: declared_axes.Reading | None = None
+        self._first_offering: RecordOnlyTrigger | None = None
         self.accounts = PopulationAccounts(
             state,
             instrument=instrument,
@@ -457,18 +607,28 @@ class SteadyState:
     def run(self, source: BarSource) -> SteadyStateRun:
         """Walk ``source`` once, turning the population over at every trigger."""
         evaluation = self.accounts.run(source, self.config, turnover=self._turn_over)
+        report = TurnoverReport(
+            triggers=tuple(self._triggers),
+            deaths=tuple(self._deaths),
+            births=tuple(self._births),
+            per_bar=tuple(self._per_bar),
+            admission_refusals=self.state.admission_refusals()
+            - self._refusals_at_start,
+            boundary_firings=MappingProxyType(dict(self._firings)),
+            parents_per_birth=self.turnover.parents_per_birth,
+            inheritance=self.turnover.inheritance,
+        )
+        if not self._offers_on:
+            return SteadyStateRun(evaluation=evaluation, report=report)
+        first = self._first_offering
         return SteadyStateRun(
             evaluation=evaluation,
-            report=TurnoverReport(
-                triggers=tuple(self._triggers),
-                deaths=tuple(self._deaths),
-                births=tuple(self._births),
-                per_bar=tuple(self._per_bar),
-                admission_refusals=self.state.admission_refusals()
-                - self._refusals_at_start,
-                boundary_firings=MappingProxyType(dict(self._firings)),
-                parents_per_birth=self.turnover.parents_per_birth,
-                inheritance=self.turnover.inheritance,
+            report=RecordOnlyTurnoverReport(
+                **vars(report),
+                initial_coverage=InitialCoverage(
+                    trigger=first,
+                    absent=NO_OFFERING_TRIGGER if first is None else None,
+                ),
             ),
         )
 
@@ -498,6 +658,7 @@ class SteadyState:
             else ()
         )
         by_id = {verdict.agent_id: verdict for verdict in verdicts}
+        offered = self._offer(window, verdicts) if self._offers_on else None
         chosen = choose_deaths(
             [
                 Candidate(
@@ -524,37 +685,116 @@ class SteadyState:
         self._hold_the_band(window)
         kinds = [kind for _, kind in chosen]
         assessed = [verdict for verdict in verdicts if verdict.deflated is not None]
+        trigger = Trigger(
+            as_of=window.as_of,
+            index=index,
+            replacement_count=turnover.replacement_count,
+            eligible=len(eligible),
+            below_minimum_age=len(living) - len(eligible),
+            worse=sum(verdict.standing == "worse" for verdict in assessed),
+            indistinguishable=sum(
+                verdict.standing == "indistinguishable" for verdict in assessed
+            ),
+            better=sum(verdict.standing == "better" for verdict in assessed),
+            unassessed=len(verdicts) - len(assessed),
+            deaths=len(chosen),
+            culls=kinds.count(DeathKind.CULL),
+            retirements=kinds.count(DeathKind.RETIREMENT),
+            protected_retirements=kinds.count(DeathKind.PROTECTED_RETIREMENT),
+            candidates=sum(
+                by_id[agent_id].deflated is not None
+                for agent_id in survivors
+                if agent_id in by_id
+            ),
+            blind=blind,
+            births=born,
+            admission_refusals=self._refused_here,
+            births_lost=len(chunks) - born,
+        )
         self._triggers.append(
-            Trigger(
-                as_of=window.as_of,
-                index=index,
-                replacement_count=turnover.replacement_count,
-                eligible=len(eligible),
-                below_minimum_age=len(living) - len(eligible),
-                worse=sum(verdict.standing == "worse" for verdict in assessed),
-                indistinguishable=sum(
-                    verdict.standing == "indistinguishable" for verdict in assessed
-                ),
-                better=sum(verdict.standing == "better" for verdict in assessed),
-                unassessed=len(verdicts) - len(assessed),
-                deaths=len(chosen),
-                culls=kinds.count(DeathKind.CULL),
-                retirements=kinds.count(DeathKind.RETIREMENT),
-                protected_retirements=kinds.count(DeathKind.PROTECTED_RETIREMENT),
-                candidates=sum(
-                    by_id[agent_id].deflated is not None
-                    for agent_id in survivors
-                    if agent_id in by_id
-                ),
-                blind=blind,
-                births=born,
-                admission_refusals=self._refused_here,
-                births_lost=len(chunks) - born,
-            )
+            trigger if offered is None else self._recorded(trigger, window, offered)
         )
         self._per_bar.append(
             BarTurnover(as_of=window.as_of, births=born, deaths=len(chosen))
         )
+
+    def _offer(self, window: BarWindow, verdicts: Sequence[DeflatedFitness]) -> _Offers:
+        """Offer the record each agent ``verdicts`` assessed and the population describes.
+
+        Called after the trigger's one deflate call and before its first
+        death. Living occupancy is read here, over the living at that instant,
+        and the record's coverage once the offers are made. What the record
+        keeps or excludes is counted and never acted on.
+        """
+        population = self.population
+        occupancy = population.occupancy()
+        excluded_before = len(population.excluded())
+        made = kept = undefined = 0
+        for verdict in verdicts:
+            if verdict.deflated is None:
+                continue
+            try:
+                descriptor = population.descriptor(verdict.agent_id)
+            except declared_axes.DescriptorUnavailable:
+                undefined += 1
+                continue
+            made += 1
+            kept += population.record(
+                ArchiveEntry(
+                    agent_id=verdict.agent_id,
+                    genome=population.genome(verdict.agent_id),
+                    descriptor=descriptor,
+                    objectives=MappingProxyType({"deflated": verdict.deflated}),
+                    recorded_at=window.as_of,
+                )
+            )
+        return _Offers(
+            made=made,
+            kept=kept,
+            excluded=len(population.excluded()) - excluded_before,
+            undefined=undefined,
+            occupancy=occupancy,
+            coverage=population.coverage(),
+        )
+
+    def _recorded(
+        self, trigger: Trigger, window: BarWindow, offered: _Offers
+    ) -> RecordOnlyTrigger:
+        """The trigger's row, with what it offered and the descriptors read at it."""
+        assert self._declaration is not None
+        reading = declared_axes.read(self.state, self._declaration)
+        earlier, self._last_reading = self._last_reading, reading
+        exclusions: dict[str, dict[str, int]] = {}
+        for described in reading.described.values():
+            for axis, reason in described.excluded.items():
+                counts = exclusions.setdefault(axis, {})
+                counts[reason] = counts.get(reason, 0) + 1
+        recorded = RecordOnlyTrigger(
+            **vars(trigger),
+            segment_id=window.segment_id,
+            offers=offered.made,
+            offers_kept=offered.kept,
+            offers_excluded=offered.excluded,
+            not_offered_descriptor_undefined=offered.undefined,
+            cumulative_coverage=offered.coverage,
+            living_occupancy=offered.occupancy,
+            described=len(reading.described),
+            undescribed=len(reading.undescribed),
+            descriptor_exclusions=MappingProxyType(
+                {axis: MappingProxyType(counts) for axis, counts in exclusions.items()}
+            ),
+            drift=None if earlier is None else declared_axes.drift(earlier, reading),
+            population_quantiles=declared_axes.marginal_quantiles(reading),
+            raw_beta=MappingProxyType(
+                {
+                    agent_id: described.raw[declared_axes.BETA]
+                    for agent_id, described in reading.described.items()
+                }
+            ),
+        )
+        if offered.made and self._first_offering is None:
+            self._first_offering = recorded
+        return recorded
 
     def _sample(self, agent_id: AgentId) -> FitnessSample:
         """An agent's own most recent outcomes, as many as the window holds."""

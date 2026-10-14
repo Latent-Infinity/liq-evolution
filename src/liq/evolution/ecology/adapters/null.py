@@ -57,6 +57,7 @@ from liq.evolution.ecology.types import (
     Genome,
     InstrumentId,
     Intent,
+    LivingOccupancy,
     NotFilled,
     NullDeclaration,
     Offspring,
@@ -535,6 +536,28 @@ class NullAgentPopulation:
     def excluded(self) -> tuple[ArchiveEntry, ...]:
         """Return every entry refused for a coordinate the record cannot bin."""
         return tuple(self._excluded)
+
+    def occupancy(self) -> LivingOccupancy:
+        """Return the coarse cells the living occupy, by the record's own cell rule.
+
+        A coordinate outside the unit interval, or not a number, is in no cell.
+        """
+        cells = set()
+        excluded = 0
+        for agent_id in self.agent_ids():
+            descriptor = self.descriptor(agent_id)
+            if all(0.0 <= value <= 1.0 for value in descriptor.values.values()):
+                cells.add(self._cell(descriptor))
+            else:
+                excluded += 1
+        return LivingOccupancy(
+            axes=(_ACTIVITY,),
+            occupied=len(cells),
+            total=_CELLS_PER_AXIS,
+            described=len(self._descriptors) - excluded,
+            undescribed=0,
+            excluded=excluded,
+        )
 
     def coverage(self) -> RecordCoverage:
         """Return the coarse cells the record fills, counted from its own cells."""

@@ -45,6 +45,15 @@ loaded. An agent a population cannot yet describe is refused with
 :class:`~liq.evolution.ecology.descriptors.DescriptorUnavailable` and given no
 coordinate; a registration that holds no such agent says so rather than passing
 over nothing.
+
+The population also reports where its living agents sit. Its occupancy — the
+distinct cells holding a living agent, under the record's own binning — is read
+from the living and never from the record, so entries in cells nobody alive
+occupies count for nothing, and reading it changes neither. A living agent the
+population cannot describe occupies no cell and is counted undescribed; one
+whose coordinate the record cannot bin occupies no cell either and is counted
+excluded, never clamped into one. Each registration names how its record bins a
+coordinate, and the occupancy is checked against that and nothing else.
 """
 
 from __future__ import annotations
@@ -356,6 +365,67 @@ def coverage_problems(population: AgentPopulation) -> list[str]:
     return problems
 
 
+#: A record's binning, as a registration states it: the cell a descriptor
+#: falls in, or ``None`` when the record cannot bin it.
+RecordCell = Callable[[AgentPopulation, Descriptor], tuple[float, ...] | None]
+
+
+def null_record_cell(
+    population: AgentPopulation, descriptor: Descriptor
+) -> tuple[float, ...] | None:
+    """The stand-in's coarse cell: each value to one decimal, in name order.
+
+    A value outside the unit interval, or not a number, is not binned.
+    """
+    values = [value for _, value in sorted(descriptor.values.items())]
+    if not all(0.0 <= value <= 1.0 for value in values):
+        return None
+    return tuple(round(value, 1) for value in values)
+
+
+def array_record_cell(
+    population: AgentPopulation, descriptor: Descriptor
+) -> tuple[float, ...] | None:
+    """The platform archive's own cell, through its public binning, on the record's axes."""
+    assert isinstance(population, ArrayGenomePopulation)
+    axes = population.coverage().axes
+    try:
+        return tuple(
+            float(index)
+            for index in population.archive.cell_of(
+                tuple(descriptor.values[axis] for axis in axes)
+            )
+        )
+    except ValueError:
+        return None
+
+
+def occupancy_oracle(
+    population: AgentPopulation, record_cell: RecordCell
+) -> tuple[int, int, int, int]:
+    """Occupied cells, described, undescribed and excluded, from the living alone."""
+    cells: set[tuple[float, ...]] = set()
+    described = undescribed = excluded = 0
+    for agent_id in population.agent_ids():
+        try:
+            descriptor = population.descriptor(agent_id)
+        except DescriptorUnavailable:
+            undescribed += 1
+            continue
+        cell = record_cell(population, descriptor)
+        if cell is None:
+            excluded += 1
+            continue
+        described += 1
+        cells.add(cell)
+    return len(cells), described, undescribed, excluded
+
+
+#: Coordinates an entry may be moved to so that it sits in a cell no living
+#: agent occupies; the first that does is used.
+SPARE_COORDINATES = (0.03, 0.27, 0.43, 0.61, 0.77, 0.97)
+
+
 class AgentPopulationContract:
     """What a population promises, whichever variation and record it holds.
 
@@ -385,6 +455,18 @@ class AgentPopulationContract:
     undescribed_factory: ClassVar[
         Callable[[], tuple[AgentPopulation, AgentId]] | None
     ] = None
+
+    #: How this registration's record bins a coordinate. ``None`` names none,
+    #: and the occupancy cases fail rather than check against nothing.
+    record_cell: ClassVar[RecordCell | None] = None
+
+    def _record_cell(self) -> RecordCell:
+        record_cell = type(self).record_cell
+        if record_cell is None:
+            pytest.fail(
+                "this registration names no record binning to check occupancy on"
+            )
+        return record_cell
 
     @pytest.fixture
     def adapter(self) -> AgentPopulation:
@@ -826,11 +908,90 @@ class AgentPopulationContract:
         with pytest.raises(DescriptorUnavailable):
             population.descriptor(agent_id)
 
+    def test_occupancy_counts_the_living_under_the_records_binning(
+        self, adapter: AgentPopulation
+    ) -> None:
+        """Distinct cells holding a living agent, and every living agent accounted for."""
+        occupancy = adapter.occupancy()
+        assert isinstance(occupancy, ecology.LivingOccupancy)  # ty: ignore[unresolved-attribute]
+        occupied, described, undescribed, excluded = occupancy_oracle(
+            adapter, self._record_cell()
+        )
+        coverage = adapter.coverage()
+        assert occupancy.axes == coverage.axes
+        assert occupancy.total == coverage.total
+        assert (
+            occupancy.occupied,
+            occupancy.described,
+            occupancy.undescribed,
+            occupancy.excluded,
+        ) == (occupied, described, undescribed, excluded)
+        assert described + undescribed + excluded == len(adapter.agent_ids())
+        assert occupancy.occupied >= 1, (
+            "no living agent was binned, so nothing was checked"
+        )
+
+    def test_occupancy_does_not_read_the_record(self, adapter: AgentPopulation) -> None:
+        """Entries in cells nobody alive occupies count for nothing; an empty record changes nothing."""
+        record_cell = self._record_cell()
+        before = adapter.occupancy()
+        living = {
+            record_cell(adapter, adapter.descriptor(agent_id))
+            for agent_id in adapter.agent_ids()
+        }
+        template = offer(adapter, adapter.agent_ids()[0], 1.0)
+        spare = [
+            entry
+            for entry in (unbinnable(template, value) for value in SPARE_COORDINATES)
+            if record_cell(adapter, entry.descriptor) not in living
+        ]
+        assert spare, "every spare coordinate falls in a cell a living agent occupies"
+        for entry in spare:
+            adapter.record(entry)
+        assert adapter.recorded() != ()
+        assert adapter.coverage().filled >= 1
+        assert adapter.occupancy() == before
+
+    def test_reading_occupancy_changes_neither_the_record_nor_the_living(
+        self, adapter: AgentPopulation
+    ) -> None:
+        """Occupancy is a read: the record, its coverage and the living are as they were."""
+        offered_by_each(adapter)
+        held, covered = adapter.recorded(), adapter.coverage()
+        living = adapter.agent_ids()
+        genomes = [adapter.genome(agent_id) for agent_id in living]
+        first = adapter.occupancy()
+        assert adapter.occupancy() == first
+        assert adapter.recorded() == held
+        assert adapter.coverage() == covered
+        assert adapter.agent_ids() == living
+        assert [adapter.genome(agent_id) for agent_id in living] == genomes
+
+    def test_an_undescribed_population_occupies_no_cell(self) -> None:
+        """Every living agent short of its descriptor is counted undescribed, in no cell."""
+        factory = type(self).undescribed_factory
+        if factory is None:
+            pytest.skip("this registration holds no agent it cannot describe")
+        population, _ = factory()
+        occupancy = population.occupancy()
+        occupied, described, undescribed, excluded = occupancy_oracle(
+            population, self._record_cell()
+        )
+        assert (
+            occupancy.occupied,
+            occupancy.described,
+            occupancy.undescribed,
+            occupancy.excluded,
+        ) == (occupied, described, undescribed, excluded)
+        assert occupancy.occupied == 0
+        assert occupancy.undescribed == len(population.agent_ids())
+
 
 class TestNullAgentPopulation(AgentPopulationContract):
     """The stand-in, held to the same contract as any provider-backed population."""
 
     adapter_factory = staticmethod(NullAgentPopulation)
+    record_cell = staticmethod(null_record_cell)
 
 
 @dataclass
@@ -915,6 +1076,7 @@ class TestArrayGenomePopulation(AgentPopulationContract):
 
     adapter_factory = staticmethod(an_array_genome_population)
     untied_factory = staticmethod(an_untied_array_genome_population)
+    record_cell = staticmethod(array_record_cell)
 
     def test_a_population_too_small_for_the_platforms_selection_is_refused(
         self,
@@ -1041,3 +1203,91 @@ def test_a_coverage_that_cannot_describe_a_record_is_refused(
     }
     with pytest.raises(ValueError, match=message):
         ecology.RecordCoverage(**declared)  # ty: ignore[unresolved-attribute]
+
+
+@pytest.mark.parametrize(
+    ("shape", "message"),
+    [
+        ({"undescribed": -1}, "negative"),
+        ({"occupied": 3}, "no more cells"),
+        ({"occupied": 2, "total": 1}, "no more cells"),
+        ({"occupied": 0}, "no cell occupied"),
+    ],
+)
+def test_an_occupancy_that_cannot_describe_the_living_is_refused(
+    shape: dict[str, object], message: str
+) -> None:
+    """No negative count, no more cells than placed agents or cells, and a placed agent occupies one."""
+    declared: dict[str, object] = {
+        "axes": ("activity",),
+        "occupied": 1,
+        "total": 4,
+        "described": 2,
+        "undescribed": 0,
+        "excluded": 0,
+        **shape,
+    }
+    with pytest.raises(ValueError, match=message):
+        ecology.LivingOccupancy(**declared)  # ty: ignore[unresolved-attribute]
+
+
+#: A coordinate no record bins, given to one living agent below.
+OUT_OF_BOUNDS = 1.5
+
+
+@dataclass
+class _NullWithOneOutOfBounds(NullAgentPopulation):
+    """The stand-in, with its first agent described outside the unit interval."""
+
+    def descriptor(self, agent_id: str) -> Descriptor:
+        described = super().descriptor(agent_id)
+        if agent_id != self.agent_ids()[0]:
+            return described
+        return replace(
+            described,
+            values=MappingProxyType(dict.fromkeys(described.values, OUT_OF_BOUNDS)),
+        )
+
+
+@dataclass
+class _ArrayWithOneOutOfBounds(ArrayGenomePopulation):
+    """The array population, with its first agent described outside the unit interval."""
+
+    def descriptor(self, agent_id: str) -> Descriptor:
+        described = super().descriptor(agent_id)
+        if agent_id != self.agent_ids()[0]:
+            return described
+        return replace(
+            described,
+            values=MappingProxyType(dict.fromkeys(described.values, OUT_OF_BOUNDS)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("build", "record_cell"),
+    [
+        (lambda: _NullWithOneOutOfBounds(), null_record_cell),
+        (
+            lambda: _ArrayWithOneOutOfBounds(
+                state=an_array_genome_population().state,
+                descriptor_schema_version=ARRAY_DESCRIPTOR_SCHEMA,
+            ),
+            array_record_cell,
+        ),
+    ],
+    ids=["null", "array"],
+)
+def test_a_living_agent_the_record_cannot_bin_is_excluded_never_clamped(
+    build: Callable[[], AgentPopulation], record_cell: RecordCell
+) -> None:
+    """It is counted excluded and occupies no cell, the top cell included."""
+    population = build()
+    occupancy = population.occupancy()
+    assert occupancy.excluded == 1
+    assert occupancy.described == len(population.agent_ids()) - 1
+    assert (
+        occupancy.occupied,
+        occupancy.described,
+        occupancy.undescribed,
+        occupancy.excluded,
+    ) == occupancy_oracle(population, record_cell)

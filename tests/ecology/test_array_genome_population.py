@@ -724,6 +724,7 @@ class TestDeclaredArrayGenomePopulation(contract.AgentPopulationContract):
 
     adapter_factory = staticmethod(a_declared_array_genome_population)
     undescribed_factory = staticmethod(an_undescribed_declared_population)
+    record_cell = staticmethod(contract.array_record_cell)
 
 
 def _bin(value: float, cells: int) -> int:

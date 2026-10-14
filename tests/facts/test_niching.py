@@ -1,4 +1,18 @@
-"""Evidence that a persisted diversity record restores into its own run without loss.
+"""Evidence that the diversity record is reported as it is, and restores into its own run.
+
+``ECOLOGY.NICHE.COVERAGE_REPORTED.v1`` (EV-E81, library half): given a run with
+the record's offers configured on (``diversity_record = "record_only"``), when
+its report is read, then at every trigger it states the archive's coverage —
+read from the record through the population port and labelled cumulative —
+beside the living occupancy at that trigger, read through the port under the
+archive's own binning; and the initial coverage after the first trigger at
+which an entry was offered, with that trigger's index and instant, or, when no
+entry was ever offered, absent with its reason and never as zero filled cells.
+Each figure is checked against what is read from outside the loop: the
+archive's own ``coverage_report()``, the cells of ``recorded()`` and of the
+living counted by ``tests/support/niche_census.py`` under the archive's public
+binning. Configuring the offers on is not niching, and nothing here is evidence
+that diversity is retained.
 
 ``ECOLOGY.NICHE.ARCHIVE_ROUND_TRIPS.v1`` (EV-E18): given a diversity record
 persisted by a run, when it is restored into that run, then every entry — its
@@ -9,7 +23,7 @@ archive payload version or another run is refused rather than loaded.
 **What is round-tripped.** A record on the four declared axes under
 ``ecology-descriptors-2``, binned at the descriptor-parameter decision record's
 counts. It is filled by walking the declared stream S1 through the steady-state
-loop. With niching off the loop offers nothing, so this check builds the entries
+loop. With the record's offers off the loop offers nothing, so this check builds the entries
 itself, shaped as the loop's would be: at each replacement trigger, after that
 trigger's one deflate call and before its first death, one entry for each agent
 that call assessed and whose descriptor is defined — its genome and descriptor
@@ -51,6 +65,7 @@ from liq.evolution.ecology.types import (
     UtcTimestamp,
 )
 from liq.gp.evolution.qd_archive import QDArchive
+from tests.support import niche_census, record_trace
 from tests.support import turnover_stream as streams
 
 #: How many decision points the walk covers: many triggers past the warm-up, so
@@ -429,3 +444,131 @@ def test_a_codec_that_ignores_the_envelope_turns_the_refusals_red(
     monkeypatch.setattr(codec, "refuse_a_foreign_payload", lambda *args, **kwargs: None)
     assert foreign_version_problems(walked.population) != []
     assert another_run_problems(walked.population) != []
+
+
+# ---------------------------------------------------------------------------
+# Coverage, as the turnover report states it
+# ---------------------------------------------------------------------------
+
+
+def _census_excluded_at_each_occupancy(
+    walked: record_trace.Walked, censused: dict[int, tuple[int, int]]
+) -> None:
+    """At each ``occupancy()`` call, count the living the record cannot bin.
+
+    Read beside ``record_trace``'s own census, at the same instant: each living
+    agent the population port describes is placed with the platform archive's
+    public ``cell_of``; one it refuses is excluded. Stored per bar as
+    ``(cells, excluded)``.
+    """
+    population, trace = walked.population, walked.trace
+    occupancy = walked.port.occupancy
+
+    def counted():
+        excluded = 0
+        for agent_id in population.agent_ids():
+            try:
+                described = population.descriptor(agent_id)
+            except descriptors.DescriptorUnavailable:
+                continue
+            try:
+                population.archive.cell_of(
+                    tuple(described.values[axis] for axis in descriptors.AXES)
+                )
+            except ValueError:
+                excluded += 1
+        made = occupancy()
+        censused[trace.bar] = (trace.occupancy_census[-1][2], excluded)
+        return made
+
+    walked.port.occupancy = counted  # ty: ignore[invalid-assignment]
+
+
+def test_the_turnover_report_states_coverage_from_the_record() -> None:
+    """Every trigger row's coverage is the record's own, beside the living's cells.
+
+    A second walk is the record-only walk with ``max_turnover=1.0e-3``, the
+    walk the exclusion case in ``tests/ecology/test_steady_state.py`` uses:
+    its agents' turnover lies outside the unit interval, so living agents with
+    a defined descriptor are refused a cell by ``cell_of``. Its premise — at
+    least one trigger with such an agent — is asserted, and there occupancy's
+    ``occupied`` and ``excluded`` equal the census
+    (``liq-docs/plans/oracle-v4-sufficiency-gaps-2026-10-14.md`` §2.2).
+    """
+    read: dict[int, tuple[object, dict[str, object], int]] = {}
+    holder: dict[str, record_trace.Walked] = {}
+
+    def look(index: int) -> None:
+        if "walked" not in holder or index < 0:
+            return
+        population = holder["walked"].population
+        read[index] = (
+            population.coverage(),
+            population.archive.coverage_report(),
+            niche_census.record_cells(population),
+        )
+
+    walked = record_trace.walk(
+        diversity_record="record_only",
+        look=look,
+        before_run=lambda walked: holder.update(walked=walked),
+    )
+    report = walked.run.report  # ty: ignore[unresolved-attribute]
+    census = {bar: (who, count) for bar, who, count in walked.trace.occupancy_census}
+
+    assert report.triggers, "no trigger fell, so no coverage was reported"
+    for row in report.triggers:
+        coverage, platform, cells = read[row.index]
+        assert row.cumulative_coverage == coverage, row.index
+        assert row.cumulative_coverage.filled == platform["filled_bins"] == cells
+        assert row.cumulative_coverage.total == platform["total_bins"]
+        living, occupied = census[row.index]
+        assert living == walked.watched.living[row.index], (
+            "living occupancy was not read over the living at the offer instant"
+        )
+        assert row.living_occupancy.occupied == occupied, row.index
+    filled = [row.cumulative_coverage.filled for row in report.triggers]
+    assert filled == sorted(filled), "a coverage labelled cumulative fell"
+    assert filled[-1] > 0
+    first = next(row for row in report.triggers if row.offers)
+    initial = report.initial_coverage
+    assert initial.absent is None
+    assert initial.trigger is first
+    assert (initial.trigger.index, initial.trigger.as_of) == (first.index, first.as_of)
+    assert initial.coverage == read[first.index][0]
+
+    censused: dict[int, tuple[int, int]] = {}
+    excluding = record_trace.walk(
+        diversity_record="record_only",
+        max_turnover=1.0e-3,
+        before_run=lambda walked: _census_excluded_at_each_occupancy(walked, censused),
+    )
+    rows = excluding.run.report.triggers  # ty: ignore[unresolved-attribute]
+    with_excluded = [row for row in rows if censused[row.index][1] > 0]
+    assert with_excluded, (
+        "no trigger held a living, described agent the record cannot bin, so "
+        "exclusion from occupancy was never exercised"
+    )
+    for row in with_excluded:
+        cells, excluded = censused[row.index]
+        assert row.living_occupancy.occupied == cells, row.index
+        assert row.living_occupancy.excluded == excluded, row.index
+
+
+def test_a_run_with_no_offer_reports_initial_coverage_absent() -> None:
+    """A run too short for any agent to be assessed and described has none."""
+    walked = record_trace.walk(
+        diversity_record="record_only",
+        windows=streams.priced(count=record_trace.WINDOW + 1),
+    )
+    report = walked.run.report  # ty: ignore[unresolved-attribute]
+
+    assert report.triggers, "no trigger fell, so the absent case was never reached"
+    assert any(row.not_offered_descriptor_undefined for row in report.triggers), (
+        "no assessed agent went undescribed, so the run was not the declared one"
+    )
+    assert all(row.offers == 0 for row in report.triggers)
+    initial = report.initial_coverage
+    assert initial.trigger is None
+    assert initial.coverage is None, "an absent initial coverage was given a figure"
+    assert initial.absent == "no agent was both assessed and described"

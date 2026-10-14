@@ -428,6 +428,123 @@ def test_drift_leaves_out_an_agent_not_described_at_both_or_excluded_on_the_axis
     assert drifted["beta"].count == len(reading.described) - 1
 
 
+def _moved(
+    described: descriptors.AgentDescriptor, by: float
+) -> descriptors.AgentDescriptor:
+    """``described`` with every behavioural value moved by ``by``, nothing excluded."""
+    return replace(
+        described,
+        values=MappingProxyType(
+            {
+                axis: value + by if axis in descriptors.BEHAVIOURAL_AXES else value
+                for axis, value in described.values.items()
+            }
+        ),
+        excluded=MappingProxyType({}),
+    )
+
+
+def _identity_paired(earlier, later, axis: str) -> descriptors.Drift:
+    """The oracle: each agent described at both against its own earlier reading."""
+    deltas = [
+        abs(later.described[a].values[axis] - earlier.described[a].values[axis])
+        for a in later.described
+        if a in earlier.described
+    ]
+    if not deltas:
+        return descriptors.Drift(count=0, median=None, q90=None, maximum=None)
+    held = np.asarray(deltas)
+    return descriptors.Drift(
+        count=len(deltas),
+        median=float(np.median(held)),
+        q90=float(np.quantile(held, 0.9)),
+        maximum=float(held.max()),
+    )
+
+
+def _earlier_reading():
+    state, _ = _walked()
+    reading = descriptors.read(state, _declaration())
+    earlier = replace(
+        reading,
+        described=MappingProxyType(
+            {
+                agent_id: replace(described, excluded=MappingProxyType({}))
+                for agent_id, described in reading.described.items()
+            }
+        ),
+    )
+    assert len(earlier.described) >= 3, "too few described to tell pairings apart"
+    return earlier
+
+
+def test_drift_pairs_each_agent_with_its_own_earlier_reading() -> None:
+    """A later reading holding the same agents in another order: each meets its own past."""
+    earlier = _earlier_reading()
+    order = sorted(earlier.described)
+    later = replace(
+        earlier,
+        described=MappingProxyType(
+            {
+                agent_id: _moved(earlier.described[agent_id], 0.01 * (at + 1))
+                for at, agent_id in reversed(list(enumerate(order)))
+            }
+        ),
+    )
+    assert list(later.described) != list(earlier.described)
+
+    drifted = descriptors.drift(earlier, later)
+
+    by_position_differs = False
+    for axis in descriptors.BEHAVIOURAL_AXES:
+        assert drifted[axis] == _identity_paired(earlier, later, axis), axis
+        by_position = np.asarray(
+            [
+                abs(one.values[axis] - other.values[axis])
+                for one, other in zip(
+                    later.described.values(), earlier.described.values(), strict=True
+                )
+            ]
+        )
+        by_position_differs |= (
+            float(np.median(by_position)),
+            float(np.quantile(by_position, 0.9)),
+            float(by_position.max()),
+        ) != (drifted[axis].median, drifted[axis].q90, drifted[axis].maximum)
+    assert by_position_differs, (
+        "pairing by position gives the same summary on every axis, so the case "
+        "cannot tell it from pairing by identity"
+    )
+
+
+def test_drift_leaves_out_an_agent_described_only_at_the_later_reading() -> None:
+    """An agent first described at the later reading has no drift, not a drift of zero."""
+    full = _earlier_reading()
+    newcomer, *before = sorted(full.described)
+    earlier = replace(
+        full,
+        described=MappingProxyType(
+            {agent_id: full.described[agent_id] for agent_id in before}
+        ),
+    )
+    later = replace(
+        full,
+        described=MappingProxyType(
+            {
+                agent_id: _moved(described, 0.01 * (at + 1))
+                for at, (agent_id, described) in enumerate(full.described.items())
+            }
+        ),
+    )
+    assert newcomer in later.described and newcomer not in earlier.described
+
+    drifted = descriptors.drift(earlier, later)
+
+    for axis in descriptors.BEHAVIOURAL_AXES:
+        assert drifted[axis].count == len(before), axis
+        assert drifted[axis] == _identity_paired(earlier, later, axis), axis
+
+
 def test_drift_with_nobody_described_twice_reports_a_count_of_zero() -> None:
     state, _ = _walked(count=WINDOW)
     empty = descriptors.read(state, _declaration())

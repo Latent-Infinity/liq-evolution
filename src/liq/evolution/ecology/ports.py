@@ -40,6 +40,7 @@ from liq.evolution.ecology.types import (
     FitnessSample,
     Genome,
     Intent,
+    LivingOccupancy,
     NotFilled,
     NullDeclaration,
     Offspring,
@@ -221,6 +222,12 @@ class AgentPopulation(Protocol):
       cells there are, and per axis how many held entries sit in each cell.
       An entry whose coordinate the record cannot bin is not kept, changes
       nothing else, and is handed back by :meth:`excluded`.
+    * The living report where they sit. :meth:`occupancy` reads every living
+      agent's descriptor and bins it by the record's own binning — never by
+      arithmetic of its own — and it never reads the record: an entry in a cell
+      nobody alive occupies counts for nothing. An agent it cannot describe, or
+      whose coordinate the record cannot bin, occupies no cell and is counted
+      as such. Reading it changes neither the record nor the living.
     * The record persists for restart of the run that wrote it, and only that
       run. :meth:`persisted` reads the record into a payload whose envelope
       names the payload version, the run, the descriptor vocabulary and the
@@ -278,6 +285,10 @@ class AgentPopulation(Protocol):
 
     def excluded(self) -> tuple[ArchiveEntry, ...]:
         """Return every entry refused for a coordinate the record cannot bin."""
+        ...
+
+    def occupancy(self) -> LivingOccupancy:
+        """Return the cells the living occupy, read from the living, never the record."""
         ...
 
     def persisted(self, run_id: str) -> RecordPayload:

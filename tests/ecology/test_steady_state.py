@@ -17,7 +17,9 @@ What is pinned here is the rest of the rule
   too-young parent at an ordinary trigger, and a whole trigger drawn blind, at
   the same birth count, when too few agents carry a figure;
 * the inheritance setting decides what crosses a birth, bit for bit;
-* no birth, death, cull or retirement offers an entry to the diversity record;
+* with the record's offers on, the loop decides exactly what it decides with them
+  off, and every trigger row reports what was offered and read; with them off,
+  the default, the report is the offer-free loop's to the byte;
 * a walk-forward split boundary triggers nothing and resets nothing;
 * the configurations the records refuse are refused at construction.
 
@@ -33,7 +35,7 @@ from types import MappingProxyType
 import pytest
 
 from liq.evolution import ecology
-from liq.evolution.ecology import agent
+from liq.evolution.ecology import agent, descriptors
 from liq.evolution.ecology.adapters import (
     ArrayGenomePopulation,
     NullExecutionSimulator,
@@ -43,6 +45,7 @@ from liq.evolution.ecology.adapters import (
 from liq.evolution.ecology.config import EcologyConfig, LearningConfig, PopulationConfig
 from liq.evolution.ecology.types import DeflatedFitness
 from tests.support import level_shift_stream as s1
+from tests.support import record_trace
 from tests.support import turnover_stream as streams
 
 DECISION_POINTS = 90
@@ -546,41 +549,141 @@ def _genome_of(run: streams.Steady, agent_id: str):
 # ---------------------------------------------------------------------------
 # The diversity record
 # ---------------------------------------------------------------------------
+#
+# With the offers off, the default, the loop offers nothing:
+# ``tests/facts/test_archive_interaction.py::test_niching_off_offers_nothing``
+# (EV-E79) carries that case, byte-identity included, and replaces the one that
+# stood here (``liq-docs/plans/oracle-v4-archive-interaction-2026-10-02.md`` §7).
+# That the record carries across a split boundary is EV-E79's
+# ``test_the_record_carries_across_a_split_and_a_run_starts_it_empty``, cited
+# rather than repeated. Configuring the offers on is not niching.
 
 
-def test_the_loop_offers_nothing_to_the_diversity_record() -> None:
-    """No birth, death, cull or retirement offers an entry to the record.
+def _recorded(diversity_record: str, **keys: object) -> record_trace.Walked:
+    return record_trace.walk(diversity_record=diversity_record, **keys)  # ty: ignore[invalid-argument-type]
 
-    ``liq-docs/plans/oracle-v3-archive-offers-2026-10-02.md`` §1.5: the real
-    adapter's ``record`` is intercepted at the instance, and the walk must
-    both turn the population over and leave the record holding nothing.
-    """
-    config = _turnover()
-    wired = streams.wire(
-        founding=streams.founders(config.band_lower),
-        turnover=config,
-        deflator=streams.ScriptedDeflator(streams.lowest_is_worse),
+
+def test_offering_to_the_record_changes_nothing_the_loop_decides() -> None:
+    """With the offers on, every birth, death, survivor and trigger row is the default's."""
+    on = _recorded("record_only")
+    off = _recorded("none")
+
+    assert on.trace.offers, "nothing was offered, so the comparison was vacuous"
+    assert record_trace.decided(on) == record_trace.decided(off)
+
+
+def test_with_the_offers_off_the_report_is_the_default_and_carries_no_record_field() -> (
+    None
+):
+    walked = record_trace.reference_walk(diversity_record="none")
+    report = walked.run.report  # ty: ignore[unresolved-attribute]
+
+    assert walked.trace.offers == []
+    assert type(report) is ecology.steady_state.TurnoverReport
+    assert all(type(row) is ecology.steady_state.Trigger for row in report.triggers)
+    assert record_trace.report_digest(report) == record_trace.OFFER_FREE_REPORT_DIGEST
+
+
+def test_with_the_offers_on_every_trigger_row_reports_what_was_offered_and_read() -> (
+    None
+):
+    walked = _recorded("record_only")
+    report = walked.run.report  # ty: ignore[unresolved-attribute]
+    trace = walked.trace
+    windows = {window.as_of: window for window in trace.bars}
+    census = {bar: count for bar, _, count in trace.occupancy_census}
+    living = {bar: who for bar, who, _ in trace.occupancy_census}
+    excluded = {id(entry) for entry in walked.population.excluded()}
+
+    assert len(trace.occupancy_census) == len(report.triggers)
+    readings = 0
+    for row in report.triggers:
+        assert row.segment_id == windows[row.as_of].segment_id
+        assert row.cumulative_coverage.total == walked.population.archive.total_bins
+        assert row.living_occupancy.occupied == census[row.index], row.index
+        assert living[row.index] == walked.watched.living[row.index], row.index
+        made = [offer for offer in trace.offers if offer.bar == row.index]
+        assert row.offers == len(made), row.index
+        assert row.offers_kept == sum(offer.kept for offer in made), row.index
+        assert row.offers_excluded == sum(
+            id(offer.entry) in excluded for offer in made
+        ), row.index
+        assert row.described + row.undescribed == len(
+            walked.watched.living[row.index]
+        ), row.index
+        assert set(row.raw_beta) <= set(walked.watched.living[row.index])
+        assert len(row.raw_beta) == row.described
+        assert set(row.population_quantiles) == set(descriptors.BEHAVIOURAL_AXES)
+        if row.drift is None:
+            continue
+        readings += 1
+        assert set(row.drift) == set(descriptors.BEHAVIOURAL_AXES)
+    assert report.triggers[0].drift is None, "drift was read before a second reading"
+    assert readings == len(report.triggers) - 1
+    initial = report.initial_coverage
+    assert initial.absent is None
+    assert initial.trigger is next(row for row in report.triggers if row.offers)
+
+
+def test_a_descriptor_no_binning_accepts_is_counted_excluded_never_clamped() -> None:
+    """A turnover past the mandate's bound reaches the record unaltered and is refused."""
+    walked = _recorded("record_only", max_turnover=1.0e-3)
+    rows = walked.run.report.triggers  # ty: ignore[unresolved-attribute]
+    excluded = {id(entry) for entry in walked.population.excluded()}
+
+    assert excluded, "no offer was excluded, so the exclusion count was untested"
+    assert sum(row.offers_excluded for row in rows) == len(excluded)
+    for entry in walked.population.excluded():
+        assert entry.descriptor.values[descriptors.TURNOVER] > 1.0
+    assert any(
+        row.descriptor_exclusions.get(descriptors.TURNOVER, {}).get(
+            descriptors.Exclusion.OUTSIDE_UNIT_INTERVAL
+        )
+        for row in rows
     )
-    population = wired.port.inner
-    assert isinstance(population, ArrayGenomePopulation)
-    offers: list[object] = []
-    record = population.record
+    assert any(row.living_occupancy.excluded for row in rows)
 
-    def intercepted(entry):
-        offers.append(entry)
-        return record(entry)
 
-    population.record = intercepted  # ty: ignore[invalid-assignment]
-    run = wired.loop.run(  # ty: ignore[unresolved-attribute]
-        streams.Watched(streams.priced(count=DECISION_POINTS), wired.state)
+def test_initial_coverage_is_a_trigger_s_or_absent_never_both() -> None:
+    row = _recorded("record_only").run.report.initial_coverage.trigger  # ty: ignore[unresolved-attribute]
+    for trigger, absent in ((row, "a reason"), (None, None)):
+        with pytest.raises(ValueError, match="absent"):
+            ecology.steady_state.InitialCoverage(trigger=trigger, absent=absent)
+
+
+@pytest.mark.parametrize("value", ["niched", "on", "", "None", "record-only"])
+def test_a_diversity_record_value_that_does_not_exist_is_refused(value: str) -> None:
+    with pytest.raises(ValueError, match="diversity_record"):
+        record_trace.ecology_config(
+            run_id="keys", turnover=_turnover(), diversity_record=value
+        )
+
+
+def test_a_record_reset_at_split_boundaries_is_refused() -> None:
+    with pytest.raises(ValueError, match="record_carries_across_segments"):
+        record_trace.ecology_config(
+            run_id="keys",
+            turnover=_turnover(),
+            record_carries_across_segments=False,
+        )
+
+
+def test_offers_without_the_declaration_their_drift_is_read_under_are_refused() -> None:
+    config = record_trace.ecology_config(
+        run_id="keys", turnover=_turnover(), diversity_record="record_only"
     )
-
-    assert run.report.births, "nobody was born, so no birth could have offered"
-    assert {death.kind for death in run.report.deaths} >= {"cull", "retirement"}, (
-        "a kind of death this stream yields never happened, so it was never tested"
-    )
-    assert offers == [], "the loop offered entries to the population's diversity record"
-    assert population.recorded() == ()
+    loop = _loop(turnover=_turnover())
+    with pytest.raises(ValueError, match="diversity_record"):
+        ecology.steady_state.SteadyState(
+            population=loop.population,
+            state=loop.state,
+            deflator=NullFitnessDeflator(),
+            config=config,
+            instrument=streams.INSTRUMENT,
+            sizer=NullRiskSizer(),
+            simulator=NullExecutionSimulator(),
+            opening_equity=1.0,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -240,7 +240,9 @@ def _archive() -> QDArchive:
     """The platform archive over the four axes on the unit interval.
 
     The bins are this check's, not the ecology's: the shipped counts are the
-    V4.7 ruling's, and only whether a value can be binned at all matters here.
+    descriptor-parameter ruling's
+    (``plans/agent-ecology-adr-descriptor-parameters.md``), and only whether a
+    value can be binned at all matters here.
     """
     return QDArchive(
         n_dims=4,
@@ -611,3 +613,67 @@ def test_a_descriptor_is_unchanged_by_later_decision_points(
     assert _comparable(replayed.readings[DECISION_POINTS - 1]) != _comparable(
         walked.readings[DECISION_POINTS - 1]
     ), "the re-valued bars changed nothing later, so the replay re-valued nothing"
+
+
+def test_the_record_only_report_reads_the_populations_own_declaration(
+    descriptors: ModuleType,
+) -> None:
+    """Every record-only trigger row reads the descriptors the population itself gives.
+
+    A ``record_only`` walk over the declared streams
+    (``tests/support/record_trace.py``): the population is built under a
+    declaration and the loop handed that same declaration, as a composition
+    does. **Mechanism: interception at the reading instant.** The bar source's
+    ``look`` runs once the loop has finished a decision point and before the
+    next is handed over — the instant the trigger's row reads its descriptors
+    — and there asks the population port itself: ``descriptor(agent_id)`` for
+    each living agent, and the reading that call is built on
+    (``describe`` under the population's own declaration) for the raw beta the
+    port's descriptor carries only clipped. Raw betas compare within
+    :data:`CLOSE`: the row's reading is batched, the port's per agent, and the
+    two may differ in the last places
+    (``liq-docs/plans/oracle-v4-sufficiency-gaps-2026-10-14.md`` §2.1, §6).
+    """
+    from tests.support import record_trace
+
+    own: dict[int, dict[str, tuple[object, float]]] = {}
+    holder: dict[str, record_trace.Walked] = {}
+
+    def look(index: int) -> None:
+        if "walked" not in holder or index < 0:
+            return
+        population = holder["walked"].population
+        described: dict[str, tuple[object, float]] = {}
+        for agent_id in population.agent_ids():
+            try:
+                port = population.descriptor(agent_id)
+            except descriptors.DescriptorUnavailable:
+                continue
+            reading = descriptors.describe(
+                population.state, population.descriptors, agent_id
+            )
+            assert dict(port.values) == dict(reading.values), agent_id
+            described[agent_id] = (port, reading.raw[descriptors.BETA])
+        own[index] = described
+
+    walked = record_trace.walk(
+        diversity_record="record_only",
+        look=look,
+        before_run=lambda walked: holder.update(walked=walked),
+    )
+    rows = walked.run.report.triggers  # ty: ignore[unresolved-attribute]
+
+    assert rows, "no trigger fell, so no row was read"
+    assert any(row.described > 0 for row in rows), (
+        "no row described anyone, so the declaration was never read"
+    )
+    assert any(row.raw_beta for row in rows), "no row carried a raw beta"
+    for row in rows:
+        expected = own[row.index]
+        assert row.described == len(expected), row.index
+        assert set(row.raw_beta) == set(expected), row.index
+        for agent_id, raw in row.raw_beta.items():
+            assert raw == pytest.approx(expected[agent_id][1], nan_ok=True, **CLOSE), (
+                row.index,
+                agent_id,
+            )
