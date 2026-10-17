@@ -21,13 +21,16 @@ from datetime import UTC, datetime
 from typing import Literal, get_args
 
 __all__ = [
+    "BOOK_ACCOUNT_ID",
     "AccountState",
     "AgentId",
     "ArchiveEntry",
     "Bar",
     "BarWindow",
     "CostProvenance",
+    "ConstrainedBook",
     "CostScenarioId",
+    "DeRiskEvent",
     "DeflatedFitness",
     "Descriptor",
     "Fill",
@@ -36,6 +39,7 @@ __all__ = [
     "InstrumentId",
     "Intent",
     "LivingOccupancy",
+    "NettedBook",
     "NotFilled",
     "NullDeclaration",
     "Offspring",
@@ -65,6 +69,11 @@ class _UtcTimestampMixin:
 
 # Stable identity of one agent for the life of a run, unique across rebirths.
 type AgentId = str
+
+#: The reserved identity of the aggregate book's account. The book is one
+#: continuing account beside the evaluation accounts, keyed by this identity,
+#: which no agent may be admitted under.
+BOOK_ACCOUNT_ID: AgentId = "@aggregate-book"
 
 # Stable identity of one tradable instrument, as the run's universe names it.
 type InstrumentId = str
@@ -413,14 +422,16 @@ class CostProvenance:
 
 @dataclass(frozen=True)
 class AccountState(_UtcTimestampMixin):
-    """One agent's evaluation account as of an instant.
+    """One account as of an instant: an agent's evaluation account or the aggregate book.
 
     Each agent is scored on its own account at a normalised notional, so that
     agents are comparable to each other and separable from whatever the whole
-    book holds.
+    book holds. The book keeps an account of the same shape, keyed by
+    :data:`BOOK_ACCOUNT_ID`, and is acted on and charged exactly as an agent's.
 
     Attributes:
-        agent_id: The agent the account belongs to.
+        agent_id: The agent the account belongs to, or :data:`BOOK_ACCOUNT_ID`
+            for the aggregate book.
         as_of: The instant the state describes (UTC).
         equity: Account value in normalised notional units.
         exposures: Instrument to realised signed exposure as a fraction of
@@ -798,3 +809,188 @@ class SurrogateSeries:
     replicate: int
     seed: int
     values: tuple[float, ...]
+
+
+def _refuse_a_figure_that_is_not_finite(owner: str, **figures: float) -> None:
+    for name, figure in figures.items():
+        if not math.isfinite(figure):
+            raise ValueError(
+                f"a {owner}'s {name} must be finite, got {figure!r}: a figure a "
+                "constraint reads is a number, never a sentinel standing for one"
+            )
+
+
+@dataclass(frozen=True)
+class NettedBook(_UtcTimestampMixin):
+    """The aggregate book at one decision point, netted and not yet constrained.
+
+    The book's units are its own equity: each living agent's share is its weight
+    times the exposure its mandate permitted it, as a fraction of book equity,
+    and the netted target is what those shares come to together. The shares are
+    carried with it, keyed by agent, so the batch is the whole population at
+    once and the order agents are handed in is not part of the question.
+
+    Attributes:
+        as_of: The decision instant the book was netted at (UTC).
+        instrument: The instrument the netted target is in.
+        shares: Agent to its share of the book, as a signed fraction of book
+            equity, for every living agent.
+        netted: The book's target before any aggregate constraint, as a
+            signed fraction of book equity.
+        account: The book's own account at ``as_of``, keyed by
+            :data:`BOOK_ACCOUNT_ID`: what it is worth and what it holds.
+        high_water_mark: The most the book has been worth over the pass so far.
+        de_risk_latched: Whether the de-risk path has already fired in this
+            pass.
+
+    Raises:
+        ValueError: If the account is not the book's, or not stated at
+            ``as_of``; if an agent's share is keyed by the book's identity; or
+            if a figure is not finite.
+    """
+
+    as_of: UtcTimestamp
+    instrument: InstrumentId
+    shares: Mapping[AgentId, float]
+    netted: float
+    account: AccountState
+    high_water_mark: float
+    de_risk_latched: bool
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+        if self.account.agent_id != BOOK_ACCOUNT_ID:
+            raise ValueError(
+                f"a netted book is constrained against the book's own account "
+                f"{BOOK_ACCOUNT_ID!r}, not {self.account.agent_id!r}"
+            )
+        if self.account.as_of != self.as_of:
+            raise ValueError(
+                f"the book's account is stated at {self.account.as_of.isoformat()}, "
+                f"not at the decision instant {self.as_of.isoformat()} it is "
+                "constrained at"
+            )
+        if BOOK_ACCOUNT_ID in self.shares:
+            raise ValueError(
+                f"{BOOK_ACCOUNT_ID!r} is the book's own identity and no agent's: "
+                "the book holds no share of itself"
+            )
+        _refuse_a_figure_that_is_not_finite(
+            "netted book",
+            netted=self.netted,
+            high_water_mark=self.high_water_mark,
+            **{
+                f"share of {agent_id!r}": share
+                for agent_id, share in self.shares.items()
+            },
+        )
+
+
+@dataclass(frozen=True)
+class DeRiskEvent(_UtcTimestampMixin):
+    """The book's de-risk path firing, recorded once, at the instant it fired.
+
+    Attributes:
+        as_of: The decision instant the path fired at (UTC).
+        metric: Stable code for what was measured.
+        value: What the metric read at ``as_of``.
+        threshold: The value at which the path fires.
+        high_water_mark: The most the book had been worth up to and including
+            ``as_of``: the running maximum of its equity from its opening
+            notional.
+        book_equity: What the book was worth at ``as_of``.
+        action: Stable code for what the path did to the book's target.
+        target_before: The netted target the path overrode.
+        target_after: The target it left in its place.
+        reason: Stable machine-readable code for the firing.
+        detail: Optional human-readable elaboration, such as the risk
+            authority's own reason. Never carries anything not safe to log.
+
+    Raises:
+        ValueError: If the reason is empty or a figure is not finite.
+    """
+
+    as_of: UtcTimestamp
+    metric: str
+    value: float
+    threshold: float
+    high_water_mark: float
+    book_equity: float
+    action: str
+    target_before: float
+    target_after: float
+    reason: str
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+        if not self.reason:
+            raise ValueError(
+                "a de-risk event must name a stable reason: a book stood down "
+                "for no recorded reason is a silent adjustment"
+            )
+        _refuse_a_figure_that_is_not_finite(
+            "de-risk event",
+            value=self.value,
+            threshold=self.threshold,
+            high_water_mark=self.high_water_mark,
+            book_equity=self.book_equity,
+            target_before=self.target_before,
+            target_after=self.target_after,
+        )
+
+
+@dataclass(frozen=True)
+class ConstrainedBook(_UtcTimestampMixin):
+    """What the aggregate constraints decided about one netted book, and what bound it.
+
+    The book always has a target, because holding is itself a decision: a
+    netted book a bound refuses leaves the book where a bound puts it, and that
+    is said. What cannot be expressed is a target unlike the netted one with
+    nothing recorded beside it, which is the silent adjustment this value
+    exists to make impossible.
+
+    Attributes:
+        as_of: The decision instant the book was constrained at (UTC).
+        instrument: The instrument the target is in.
+        netted: The netted target, as it was handed in.
+        target: The target the book may be sent, as a signed fraction of book
+            equity.
+        rejections: Every reduction or refusal that bound, each keyed by
+            :data:`BOOK_ACCOUNT_ID` and naming a stable reason code. Empty only
+            where the netted target stands.
+        de_risk: The de-risk event, at the decision point the path fired at,
+            or ``None``.
+
+    Raises:
+        ValueError: If the target is not finite, differs from the netted one
+            with no rejection, or disagrees with the de-risk event's record of
+            the override.
+    """
+
+    as_of: UtcTimestamp
+    instrument: InstrumentId
+    netted: float
+    target: float
+    rejections: tuple[Rejection, ...]
+    de_risk: DeRiskEvent | None = None
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("as_of")
+        _refuse_a_figure_that_is_not_finite(
+            "constrained book", netted=self.netted, target=self.target
+        )
+        if self.target != self.netted and not self.rejections:
+            raise ValueError(
+                f"a book target of {self.target} unlike the netted {self.netted} "
+                "must name every bound that changed it"
+            )
+        event = self.de_risk
+        if event is not None and (
+            event.target_before != self.netted or event.target_after != self.target
+        ):
+            raise ValueError(
+                f"the de-risk event records an override of {event.target_before} "
+                f"by {event.target_after}, but the book was netted at "
+                f"{self.netted} and sent {self.target}"
+            )

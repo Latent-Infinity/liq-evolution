@@ -28,11 +28,19 @@ provenance is worse than one that does not exist.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, get_args
 
+from liq.evolution.ecology.fixed_share import (
+    AllocationRefused,
+    FixedShare,
+    from_allocation,
+)
+
 __all__ = [
+    "AllocationConfig",
     "DEFAULT_ABSOLUTE_PENALTY",
     "DEFAULT_FORGETTING_MAXIMUM",
     "DEFAULT_FORGETTING_MINIMUM",
@@ -374,6 +382,75 @@ type DiversityRecord = Literal["none", "record_only"]
 
 
 @dataclass(frozen=True)
+class AllocationConfig:
+    """How the steady-state loop allocates, where it is configured to at all.
+
+    The first three keys are the frozen aggregator contract record's closed
+    ``[allocation]`` table, by value; the fourth is the aggregate book's
+    rebalance band. The band is required and has no default: its value is
+    supplied by whoever composes the run, under the record that chose it, so a
+    run's band is always one somebody stated. Nothing here names, selects or
+    swaps an aggregator; there is one.
+
+    Attributes:
+        contract_sha256: The frozen record's sha256.
+        eta: The record's learning rate.
+        share_rate: The record's share rate.
+        band: The rebalance band, a fraction of book equity in ``[0, 1)``.
+
+    Raises:
+        AllocationRefused: If any of the record's three values is not the
+            record's, or the band is not a finite number in ``[0, 1)``.
+    """
+
+    contract_sha256: str
+    eta: float
+    share_rate: float
+    band: float
+
+    def __post_init__(self) -> None:
+        """Refuse every aggregator value but the record's, and a band outside its range."""
+        self.aggregator()
+        band = self.band
+        if (
+            isinstance(band, bool)
+            or not isinstance(band, int | float)
+            or not 0.0 <= band < 1.0
+        ):
+            raise AllocationRefused(
+                f"band = {band!r} is not a fraction of book equity in [0, 1)"
+            )
+
+    @classmethod
+    def from_tables(
+        cls, allocation: Mapping[str, object], *, band: float
+    ) -> AllocationConfig:
+        """The configuration an ``[allocation]`` table and a stated band make.
+
+        Raises:
+            AllocationRefused: If the table carries a key outside the record's
+                closed set, lacks one, or holds a value other than the
+                record's, or if the band is refused.
+        """
+        aggregator = from_allocation(allocation)
+        assert aggregator is not None  # a table was handed, so one was built
+        return cls(
+            contract_sha256=aggregator.contract_sha256,
+            eta=aggregator.eta,
+            share_rate=aggregator.share_rate,
+            band=band,
+        )
+
+    def aggregator(self) -> FixedShare:
+        """The one aggregator, at the record's values."""
+        return FixedShare(
+            contract_sha256=self.contract_sha256,
+            eta=self.eta,
+            share_rate=self.share_rate,
+        )
+
+
+@dataclass(frozen=True)
 class EcologyConfig:
     """How one pass over history is driven.
 
@@ -401,11 +478,16 @@ class EcologyConfig:
             a walk-forward split boundary. Carrying it is the only reading
             implemented, under either value of ``diversity_record``; it is
             carried here for the reason ``window_carries_across_segments`` is.
+        allocation: How the steady-state loop allocates and forms the
+            aggregate book, or ``None``, the default, for a pass that produces
+            no weights and keeps no book.
 
     Raises:
         ValueError: If the pass could not be identified, asks for a
-            discontinuity at split boundaries that nothing implements, or
-            names a use of the diversity record that does not exist.
+            discontinuity at split boundaries that nothing implements, names
+            a use of the diversity record that does not exist, or configures
+            an allocation for a pass that no steady-state loop walks.
+        TypeError: If ``allocation`` is not an :class:`AllocationConfig`.
     """
 
     run_id: str
@@ -415,6 +497,7 @@ class EcologyConfig:
     turnover: TurnoverConfig | None = None
     diversity_record: DiversityRecord = "none"
     record_carries_across_segments: bool = True
+    allocation: AllocationConfig | None = None
 
     def __post_init__(self) -> None:
         """Refuse a pass that cannot be named or asks for what does not exist."""
@@ -442,3 +525,22 @@ class EcologyConfig:
                 "that, and accepting the setting would record a policy in "
                 "provenance that the run did not follow"
             )
+        if self.diversity_record == "record_only" and self.turnover is None:
+            raise ValueError(
+                'diversity_record = "record_only" offers the record at turnover '
+                "triggers; a pass without a turnover configuration has none and "
+                "would offer nothing, so accepting the setting would record a "
+                "policy in provenance that the run did not follow"
+            )
+        if self.allocation is not None:
+            if not isinstance(self.allocation, AllocationConfig):
+                raise TypeError(
+                    "allocation is an AllocationConfig, built from the record's "
+                    f"table and a stated band; not {type(self.allocation).__name__}"
+                )
+            if self.turnover is None:
+                raise ValueError(
+                    "only the steady-state loop allocates, and a pass without a "
+                    "turnover configuration is not one; the allocation would be "
+                    "read by nothing"
+                )

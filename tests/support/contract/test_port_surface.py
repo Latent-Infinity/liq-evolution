@@ -24,6 +24,7 @@ PORT_NAMES = (
     "BarSource",
     "ExecutionSimulator",
     "FitnessDeflator",
+    "PortfolioRisk",
     "RiskSizer",
     "SurrogateSource",
 )
@@ -37,6 +38,14 @@ TYPE_ALIASES = (
     "UtcTimestamp",
 )
 
+#: Named constants the boundary carries beside its values and aliases. The
+#: aggregate book's account identity is one: it is reserved, so no agent can be
+#: admitted under it, and it is spelled once so no two readers disagree on it.
+CONSTANTS = ("BOOK_ACCOUNT_ID",)
+
+#: The reserved identity of the aggregate book's account.
+BOOK_ACCOUNT_ID = "@aggregate-book"
+
 VALUE_TYPES = tuple(
     name for name in types.__all__ if dataclasses.is_dataclass(getattr(types, name))
 )
@@ -45,8 +54,18 @@ VALUE_TYPES = tuple(
 #: ports depend on cannot drop out of the vocabulary without a check noticing.
 #: A birth hands back an ``Offspring`` — the child with the variation that made
 #: it — rather than a bare genome; a deflation takes ``FitnessSample`` values
-#: and hands back ``DeflatedFitness`` ones.
-REQUIRED_VALUE_TYPES = ("DeflatedFitness", "FitnessSample", "Genome", "Offspring")
+#: and hands back ``DeflatedFitness`` ones. The book is constrained as a
+#: ``NettedBook`` and comes back a ``ConstrainedBook``, carrying a
+#: ``DeRiskEvent`` where the de-risk path fired.
+REQUIRED_VALUE_TYPES = (
+    "ConstrainedBook",
+    "DeflatedFitness",
+    "DeRiskEvent",
+    "FitnessSample",
+    "Genome",
+    "NettedBook",
+    "Offspring",
+)
 
 
 def test_package_states_what_it_is() -> None:
@@ -63,14 +82,20 @@ def test_every_port_and_value_type_is_reachable_from_one_import() -> None:
         assert getattr(ecology, name) is not None
 
 
-def test_the_six_ports_are_the_declared_boundary() -> None:
-    """Exactly the six named capabilities are exposed as ports."""
+def test_the_seven_ports_are_the_declared_boundary() -> None:
+    """Exactly the seven named capabilities are exposed as ports."""
     assert set(ports.__all__) == set(PORT_NAMES)
 
 
 def test_value_types_and_aliases_account_for_the_whole_vocabulary() -> None:
-    """Every exported name is either a boundary value or a named identity."""
-    assert set(types.__all__) == set(VALUE_TYPES) | set(TYPE_ALIASES)
+    """Every exported name is a boundary value, a named identity or a constant."""
+    assert set(types.__all__) == set(VALUE_TYPES) | set(TYPE_ALIASES) | set(CONSTANTS)
+
+
+def test_the_book_account_identity_is_the_reserved_one() -> None:
+    """The book's account is keyed by one reserved identity, spelled once."""
+    assert getattr(types, "BOOK_ACCOUNT_ID") == BOOK_ACCOUNT_ID  # noqa: B009
+    assert getattr(ecology, "BOOK_ACCOUNT_ID") == BOOK_ACCOUNT_ID  # noqa: B009
 
 
 @pytest.mark.parametrize("name", REQUIRED_VALUE_TYPES)
@@ -235,3 +260,143 @@ def test_a_result_is_assessed_exactly_when_it_carries_a_deflated_figure(
 ) -> None:
     """``assessed`` reads the deflated figure's presence and nothing else."""
     assert _verdict(undeflated=undeflated, deflated=deflated).assessed is assessed
+
+
+#: Where every book value below is stamped, and the one instrument it follows.
+BOOK_AS_OF = datetime(2000, 1, 1, tzinfo=UTC)
+BOOK_INSTRUMENT = "SURFACE-A"
+
+
+def _book_value(name: str):
+    """A book value type, reached by name so this module collects without it."""
+    return getattr(types, name)
+
+
+def _book_account(agent_id: str = BOOK_ACCOUNT_ID) -> types.AccountState:
+    return types.AccountState(
+        agent_id=agent_id,
+        as_of=BOOK_AS_OF,
+        equity=1.0,
+        exposures=MappingProxyType({BOOK_INSTRUMENT: 0.25}),
+        costs_charged=0.0,
+    )
+
+
+def _netted_book(**changes: object):
+    fields: dict[str, object] = {
+        "as_of": BOOK_AS_OF,
+        "instrument": BOOK_INSTRUMENT,
+        "shares": MappingProxyType({"surface-a": 0.25, "surface-b": 0.5}),
+        "netted": 0.75,
+        "account": _book_account(),
+        "high_water_mark": 1.0,
+        "de_risk_latched": False,
+    }
+    fields.update(changes)
+    return _book_value("NettedBook")(**fields)
+
+
+def _book_rejection(reason: str = "gross_leverage") -> types.Rejection:
+    return types.Rejection(
+        agent_id=BOOK_ACCOUNT_ID,
+        instrument=BOOK_INSTRUMENT,
+        as_of=BOOK_AS_OF,
+        reason=reason,
+    )
+
+
+def _de_risk(**changes: object):
+    fields: dict[str, object] = {
+        "as_of": BOOK_AS_OF,
+        "metric": "book_drawdown_from_high_water_mark",
+        "value": 0.2,
+        "threshold": 0.15,
+        "high_water_mark": 1.0,
+        "book_equity": 0.8,
+        "action": "flat",
+        "target_before": 0.75,
+        "target_after": 0.0,
+        "reason": "de_risk.drawdown",
+    }
+    fields.update(changes)
+    return _book_value("DeRiskEvent")(**fields)
+
+
+def _constrained(**changes: object):
+    fields: dict[str, object] = {
+        "as_of": BOOK_AS_OF,
+        "instrument": BOOK_INSTRUMENT,
+        "netted": 0.75,
+        "target": 0.75,
+        "rejections": (),
+        "de_risk": None,
+    }
+    fields.update(changes)
+    return _book_value("ConstrainedBook")(**fields)
+
+
+def test_a_netted_book_is_held_by_the_book_account_only() -> None:
+    """The book is constrained against its own account, never an agent's."""
+    assert _netted_book().account.agent_id == BOOK_ACCOUNT_ID
+    with pytest.raises(ValueError, match="book's own account"):
+        _netted_book(account=_book_account("surface-a"))
+    with pytest.raises(ValueError, match="no agent"):
+        _netted_book(shares=MappingProxyType({BOOK_ACCOUNT_ID: 0.75}))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"netted": math.nan},
+        {"high_water_mark": math.inf},
+        {"shares": MappingProxyType({"surface-a": math.nan})},
+    ],
+    ids=["netted", "high-water-mark", "share"],
+)
+def test_a_netted_book_carries_only_finite_figures(changes: dict[str, object]) -> None:
+    """A figure the constraint reads is a number, never a sentinel for one."""
+    with pytest.raises(ValueError, match="finite"):
+        _netted_book(**changes)
+
+
+def test_a_netted_book_is_stated_at_one_instant() -> None:
+    """The account the book is constrained against is the one at its decision point."""
+    later = dataclasses.replace(_book_account(), as_of=datetime(2000, 1, 2, tzinfo=UTC))
+    with pytest.raises(ValueError, match="decision instant"):
+        _netted_book(account=later)
+
+
+def test_a_constrained_book_that_differs_from_the_netted_one_must_say_why() -> None:
+    """A book target quietly unlike the netted one cannot be expressed."""
+    assert _constrained(target=0.5, rejections=(_book_rejection(),)).target == 0.5
+    with pytest.raises(ValueError, match="must name"):
+        _constrained(target=0.5)
+
+
+def test_a_constrained_book_carries_a_finite_target() -> None:
+    """What the book is sent to hold is a number."""
+    with pytest.raises(ValueError, match="finite"):
+        _constrained(target=math.nan, rejections=(_book_rejection(),))
+
+
+def test_a_de_risk_event_describes_the_override_it_travels_with() -> None:
+    """The event's before and after are the netted target and the constrained one."""
+    reason = _book_rejection("de_risk.drawdown")
+    fired = _constrained(target=0.0, rejections=(reason,), de_risk=_de_risk())
+    assert fired.de_risk is not None
+    with pytest.raises(ValueError, match="override"):
+        _constrained(
+            target=0.0, rejections=(reason,), de_risk=_de_risk(target_before=0.5)
+        )
+    with pytest.raises(ValueError, match="override"):
+        _constrained(
+            target=0.25, rejections=(reason,), de_risk=_de_risk(target_after=0.0)
+        )
+
+
+def test_a_de_risk_event_names_a_stable_reason_and_finite_figures() -> None:
+    """The event is counted by its code and read by its numbers."""
+    with pytest.raises(ValueError, match="stable reason"):
+        _de_risk(reason="")
+    with pytest.raises(ValueError, match="finite"):
+        _de_risk(value=math.nan)

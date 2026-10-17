@@ -1,0 +1,164 @@
+# Generated (authorized by Task V5.2): manifest of the materialised
+# family E. Nothing here is market data. Written by
+# tests/support/two_regime_stream.py; never edit by hand.
+authorized_by = "Task V5.2 / liq-docs/plans/oracle-v5-generated-streams-2026-10-15.md"
+signal_bearing = false
+citable = false
+family = "E"
+declaration = "liq-docs/artifacts/agent-ecology/aggregator-ablation/declarations/evidence-family-E.toml"
+declaration_sha256 = "039c1f629f21c604239f12238399936bc587b47c0e71ece60de7ef5e029eb458"
+generator_spec_sha256 = "8a6777ab2e7b2f65a461d732f60fdb0be673ccc50f40bb090cc5543bc0a6c877"
+generator_module = "tests/support/two_regime_stream.py"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E01"
+file = "E01.csv"
+sha256 = "d65567fbab3e4d514a38f39ea5a0afcc1d0c6fed7e2a3200c506b165ba53e371"
+seed = 1000000
+K = 8
+T = 360
+kind = "switch"
+switch_at = 144
+switch_fraction = 0.4
+regime_gap = 0.5
+noise = "pathwise"
+noise_spec = "common term sigma * z (Rademacher); no idiosyncratic draw"
+sigma = 0.01
+lam = 0.5
+best_before = "e00002"
+best_after = "e00004"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E02"
+file = "E02.csv"
+sha256 = "0660e399abee3edb70dcdc634b71071e80f3a9b498a2bc0c30dfed135cdee205"
+seed = 1000001
+K = 8
+T = 360
+kind = "switch"
+switch_at = 144
+switch_fraction = 0.4
+regime_gap = 1.0
+noise = "pathwise"
+noise_spec = "common term sigma * z (Rademacher); no idiosyncratic draw"
+sigma = 0.01
+lam = 0.5
+best_before = "e00002"
+best_after = "e00006"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E03"
+file = "E03.csv"
+sha256 = "6b762774dcbefaa3e3fb401ed6f8d8e088f5af04bfd61dc6a7e262d79e907119"
+seed = 1000002
+K = 8
+T = 360
+kind = "switch"
+switch_at = 180
+switch_fraction = 0.5
+regime_gap = 0.5
+noise = "pathwise"
+noise_spec = "common term sigma * z (Rademacher); no idiosyncratic draw"
+sigma = 0.01
+lam = 0.5
+best_before = "e00007"
+best_after = "e00002"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E04"
+file = "E04.csv"
+sha256 = "d6f4802962caacb65a76d4cf0c6e0640433a93cd83ebaba16343951d99792c8e"
+seed = 1000003
+K = 8
+T = 360
+kind = "switch"
+switch_at = 180
+switch_fraction = 0.5
+regime_gap = 1.0
+noise = "pathwise"
+noise_spec = "common term sigma * z (Rademacher); no idiosyncratic draw"
+sigma = 0.01
+lam = 0.5
+best_before = "e00003"
+best_after = "e00001"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E05"
+file = "E05.csv"
+sha256 = "424f8c1f23d51bf918c8ec9911d5e1557fa0f5f41d6e332e8e3a97ff1efa4a04"
+seed = 1000004
+K = 8
+T = 360
+kind = "switch"
+switch_at = 180
+switch_fraction = 0.5
+regime_gap = 0.5
+noise = "idiosyncratic"
+noise_spec = "common term sigma * z (Rademacher) + (lam * sigma) * standard_normal((T, P))"
+sigma = 0.01
+lam = 0.5
+best_before = "e00004"
+best_after = "e00001"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E06"
+file = "E06.csv"
+sha256 = "03464b703a687e2b6be1d53c9557a476751a5a562d61e10881771cd53bc01532"
+seed = 1000005
+K = 8
+T = 360
+kind = "switch"
+switch_at = 180
+switch_fraction = 0.5
+regime_gap = 1.0
+noise = "idiosyncratic"
+noise_spec = "common term sigma * z (Rademacher) + (lam * sigma) * standard_normal((T, P))"
+sigma = 0.01
+lam = 0.5
+best_before = "e00004"
+best_after = "e00000"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E07"
+file = "E07.csv"
+sha256 = "61ae234a2cfb9c46a0ca848875d1fda156284045a8e6739aa4aba2a88cddf157"
+seed = 1000006
+K = 8
+T = 360
+kind = "no_switch"
+regime_gap = 0.5
+noise = "pathwise"
+noise_spec = "common term sigma * z (Rademacher); no idiosyncratic draw"
+sigma = 0.01
+lam = 0.5
+best_before = "e00006"
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"
+
+[[stream]]
+id = "E08"
+file = "E08.csv"
+sha256 = "82d86cc874d3d1194f849c02ae99450c3676148511f474170b5e0b47b9c35a09"
+seed = 1000007
+K = 8
+T = 360
+kind = "all_noise"
+noise_spec = "outcomes = sigma * standard_normal((T, P)); reference = sigma * z"
+sigma = 0.01
+lam = 0.5
+generator_version = "1.0.0"
+generator_module_sha256 = "ab9a64282179f64ed8992ae0ab519cae2c9af8c97e46cd3f2c93c2ef8f909039"

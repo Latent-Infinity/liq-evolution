@@ -15,6 +15,7 @@ from liq.evolution.ecology.config import (
     PopulationConfig,
 )
 from liq.evolution.ecology.types import (
+    BOOK_ACCOUNT_ID,
     AgentId,
     UtcTimestamp,
 )
@@ -49,7 +50,8 @@ class _ConstructionMixin(_PopulationStateFields):
 
         Raises:
             ValueError: If nobody is alive, if two agents share an identity, if
-                the agents do not share one gene vocabulary, one learned-state
+                an agent carries the aggregate book's reserved identity, if the
+                agents do not share one gene vocabulary, one learned-state
                 vocabulary and one gene schema version, if a genome switches on
                 a feature it carries no weight for or carries no entry gene, if
                 an outcome history is longer than the ceiling it is restored
@@ -83,6 +85,8 @@ class _ConstructionMixin(_PopulationStateFields):
                 "two agents share an identity, so neither could be scored, "
                 "snapshotted or inherited from without the other"
             )
+        for agent_id in self._ids:
+            _refuse_the_book_identity(agent_id)
         self._row_of = {agent_id: row for row, agent_id in enumerate(self._ids)}
         self.history_capacity = snapshot.history_capacity
         self.gene_schema_version = agents[0].genome.schema_version
@@ -316,6 +320,16 @@ class _Born:
     founding_hold: BoundReached | None
 
 
+def _refuse_the_book_identity(agent_id: AgentId) -> None:
+    """Refuse an agent that would carry the aggregate book's reserved identity."""
+    if agent_id == BOOK_ACCOUNT_ID:
+        raise ValueError(
+            f"{BOOK_ACCOUNT_ID!r} is reserved for the aggregate book's account and "
+            "is no agent's identity: admitted, it would be scored, traded and "
+            "reported under the book's own name"
+        )
+
+
 def _born(birth: AgentBirth, learning: LearningConfig | None) -> _Born:
     """The single birth rule: what ``birth`` starts from, and what it records.
 
@@ -324,6 +338,7 @@ def _born(birth: AgentBirth, learning: LearningConfig | None) -> _Born:
     nowhere else, so there is one starting state, one founding hold and one
     record of it.
     """
+    _refuse_the_book_identity(birth.agent_id)
     start = _starting_state(birth, learning)
     return _Born(
         held=AgentSnapshot(

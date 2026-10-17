@@ -177,7 +177,23 @@ def persisted(
     descriptor_schema_version: str,
     axes: Sequence[str],
 ) -> RecordPayload:
-    """The platform archive's entries, encoded in its order, inside their envelope."""
+    """The platform archive's entries, encoded in its order, inside their envelope.
+
+    Raises:
+        TypeError: If the archive holds an occupant that is not an
+            :class:`~liq.evolution.ecology.types.ArchiveEntry`. The record is
+            persisted whole or not at all: a payload that left the occupant out
+            would disagree with the record it names.
+    """
+    entries = []
+    for occupant in record.elites():
+        if not isinstance(occupant, ArchiveEntry):
+            raise TypeError(
+                f"the record holds an occupant of type {type(occupant).__name__}, "
+                "not an ArchiveEntry; only entries the ecology offered are "
+                "persisted, and none is skipped"
+            )
+        entries.append(encode_entry(occupant))
     return RecordPayload(
         payload_version=PAYLOAD_VERSION,
         run_id=run_id,
@@ -185,11 +201,7 @@ def persisted(
         axes=tuple(axes),
         bins=tuple(record.bins_per_dim),
         bin_capacity=record.bin_capacity,
-        entries=tuple(
-            encode_entry(entry)
-            for entry in record.elites()
-            if isinstance(entry, ArchiveEntry)
-        ),
+        entries=tuple(entries),
     )
 
 

@@ -329,8 +329,10 @@ class ArrayGenomePopulation:
     Raises:
         ValueError: If the vocabulary is the provisional one, with or without a
             declaration; if a declaration comes without its bins or bins
-            without a declaration; or if a declared population names a
-            vocabulary other than the descriptor module's.
+            without a declaration; if a declared population names a
+            vocabulary other than the descriptor module's; or if its
+            declaration keeps a different history per agent than its store
+            does.
     """
 
     state: PopulationState
@@ -372,6 +374,14 @@ class ArrayGenomePopulation:
                 f"record in vocabulary {declared_axes.VOCABULARY!r}, not "
                 f"{self.descriptor_schema_version!r}"
             )
+        if self.descriptors.history_capacity != self.state.history_capacity:
+            raise ValueError(
+                f"the descriptor declaration's history_capacity "
+                f"{self.descriptors.history_capacity} is not the "
+                f"{self.state.history_capacity} outcomes the store keeps per "
+                "agent; a window read past what the store keeps would leave "
+                "every agent undescribed without saying why"
+            )
         horizon, turnover, beta = self.descriptor_bins
         self.archive = QDArchive(
             n_dims=len(declared_axes.AXES),
@@ -381,6 +391,11 @@ class ArrayGenomePopulation:
             descriptor_bounds=(UNIT_INTERVAL,) * len(declared_axes.AXES),
             objective_directions=directions,
         )
+
+    @property
+    def descriptor_declaration(self) -> declared_axes.DescriptorDeclaration | None:
+        """The declaration this population was built with, the same object, or ``None``."""
+        return self.descriptors
 
     @property
     def _axes(self) -> tuple[str, ...]:

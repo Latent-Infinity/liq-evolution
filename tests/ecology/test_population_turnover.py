@@ -24,6 +24,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
+from liq.evolution import ecology
 from liq.evolution.ecology import agent, config, learning
 from liq.evolution.ecology.types import BarWindow
 from tests.support import level_shift_stream as stream
@@ -550,6 +551,19 @@ def test_an_admitted_genome_that_does_not_fit_is_refused_before_anything_moves()
 
     assert state.storage() == before
     assert state.agent_ids() == ("parent",)
+
+
+def test_a_birth_carrying_the_books_identity_is_refused_and_nothing_moves() -> None:
+    """The aggregate book's account name is reserved, so no birth mid-walk takes it."""
+    state = _parent_walked_to(1, config.LearningConfig())
+    ids_before = state.agent_ids()
+    refusals_before = state.admission_refusals()
+
+    with pytest.raises(ValueError, match="reserved for the aggregate book"):
+        state.admit(_fresh(ecology.BOOK_ACCOUNT_ID, born_at=_instant(1)))
+
+    assert state.agent_ids() == ids_before
+    assert state.admission_refusals() == refusals_before
 
 
 def test_a_population_that_does_not_learn_admits_and_culls_too() -> None:

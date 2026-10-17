@@ -66,9 +66,10 @@ class _TurnoverMixin(_PopulationStateFields):
             ReadingAwaitsItsOutcome: If a decision point has been answered and
                 its outcome not yet shown.
             ValueError: If an agent of that identity is alive or has lived
-                here, if the birth states no instant, if it carries part of
-                the update's columns or a name the update does not declare, or
-                if it does not fit the population's layout.
+                here, if it carries the aggregate book's reserved identity, if
+                the birth states no instant, if it carries part of the update's
+                columns or a name the update does not declare, or if it does not
+                fit the population's layout.
             ForgettingFactorOutsideItsRange: If its forgetting factor is
                 outside the declared range.
             StartingStateOutsideItsBound: If its starting state is outside its

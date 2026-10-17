@@ -29,7 +29,7 @@ Nothing here is market data: every stream is declared arithmetic.
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import UTC, datetime
 from types import MappingProxyType
 
 import pytest
@@ -43,7 +43,7 @@ from liq.evolution.ecology.adapters import (
     NullRiskSizer,
 )
 from liq.evolution.ecology.config import EcologyConfig, LearningConfig, PopulationConfig
-from liq.evolution.ecology.types import DeflatedFitness
+from liq.evolution.ecology.types import ArchiveEntry, DeflatedFitness, Descriptor
 from tests.support import level_shift_stream as s1
 from tests.support import record_trace
 from tests.support import turnover_stream as streams
@@ -906,3 +906,442 @@ def test_no_turnover_key_holds_an_instant() -> None:
     assert not any(isinstance(value, datetime) for value in vars(config).values()), (
         "a turnover key holds an instant, so the trigger could depend on the clock"
     )
+
+
+# ---------------------------------------------------------------------------
+# Construction refusals with the record's offers on
+# ---------------------------------------------------------------------------
+
+
+def _record_only(population, state, **keys: object):
+    """A record-only loop over ``population``; ``keys`` reach the loop's constructor."""
+    return ecology.steady_state.SteadyState(
+        population=population,
+        state=state,
+        deflator=NullFitnessDeflator(),
+        config=record_trace.ecology_config(
+            run_id="refused", turnover=_turnover(), diversity_record="record_only"
+        ),
+        instrument=streams.INSTRUMENT,
+        sizer=NullRiskSizer(),
+        simulator=NullExecutionSimulator(),
+        opening_equity=1.0,
+        **keys,  # ty: ignore[invalid-argument-type]
+    )
+
+
+def _founded_for_the_record() -> agent.PopulationState:
+    return agent.PopulationState.founded(
+        streams.founders(_turnover().band_lower),
+        population=PopulationConfig(history_capacity=streams.HISTORY_CAPACITY),
+        learning=LearningConfig(),
+    )
+
+
+def test_a_record_only_pass_over_a_record_already_holding_an_entry_is_refused() -> None:
+    """A run's record starts empty: one holding an entry at start came from elsewhere."""
+    state = _founded_for_the_record()
+    population = record_trace.declared(state)
+    agent_id = population.agent_ids()[0]
+    kept = population.record(
+        ArchiveEntry(
+            agent_id=agent_id,
+            genome=population.genome(agent_id),
+            descriptor=Descriptor(
+                values=MappingProxyType(dict.fromkeys(descriptors.AXES, 0.5)),
+                schema_version=descriptors.VOCABULARY,
+            ),
+            objectives=MappingProxyType({"deflated": 1.0}),
+            recorded_at=datetime(2000, 1, 1, tzinfo=UTC),
+        )
+    )
+    assert kept and population.recorded(), "the record kept nothing, so it is empty"
+    with pytest.raises(ValueError, match="empty"):
+        _record_only(population, state, descriptor_declaration=population.descriptors)
+
+
+def test_record_only_over_a_population_not_described_in_the_declared_vocabulary_is_refused() -> (
+    None
+):
+    """The report's descriptors are the population's own; one described otherwise has none."""
+    state = _founded_for_the_record()
+    population = ArrayGenomePopulation(
+        state=state, descriptor_schema_version=streams.DESCRIPTOR_SCHEMA_VERSION
+    )
+    assert population.descriptor(population.agent_ids()[0]).schema_version != (
+        descriptors.VOCABULARY
+    )
+    with pytest.raises(ValueError, match="vocabulary"):
+        _record_only(
+            population, state, descriptor_declaration=record_trace.declaration()
+        )
+
+
+def test_a_declaration_handed_to_the_loop_that_is_not_the_populations_is_refused() -> (
+    None
+):
+    """The loop reads the population's own declaration; a second copy cannot disagree."""
+    state = _founded_for_the_record()
+    population = record_trace.declared(state)
+    other = record_trace.declaration(max_turnover=record_trace.MAX_TURNOVER / 2)
+    assert other != population.descriptor_declaration
+    with pytest.raises(ValueError, match="population's own"):
+        _record_only(population, state, descriptor_declaration=other)
+    loop = _record_only(population, state, descriptor_declaration=None)
+    assert loop._declaration is population.descriptor_declaration
+
+
+# ---------------------------------------------------------------------------
+# Allocation in the loop
+# ---------------------------------------------------------------------------
+#
+# With an allocation configured the loop updates the fixed-share weights once
+# per decision point, after settlement and the trigger's births and deaths and
+# before the population decides, and forms the aggregate book after the
+# decision; the book's target is acted on at the next bar. With none configured
+# the loop is the one it was, to the byte of its turnover report.
+
+#: A test-local band; the run's value is the composition's to supply.
+_BAND = 0.0
+
+
+def _allocation_config():
+    from liq.evolution.ecology.config import AllocationConfig
+    from tests.support import weight_oracle
+
+    record = weight_oracle.read_record()
+    return AllocationConfig.from_tables(
+        {
+            "contract_sha256": record.sha256,
+            "eta": record.contract["eta"],
+            "share_rate": record.contract["share_rate"],
+        },
+        band=_BAND,
+    )
+
+
+class _Lines:
+    """A line writer that keeps every line, in order, in a shared list."""
+
+    def __init__(self, lines: list, bound: dict | None = None) -> None:
+        self.lines = lines
+        self.bound = bound or {}
+
+    def bind(self, **values: str) -> _Lines:
+        return _Lines(self.lines, {**self.bound, **values})
+
+    def info(self, event: str, /) -> None:
+        self.lines.append(("log", self.bound.get("stage"), event, self.bound))
+
+
+class _Acting(NullExecutionSimulator):
+    """The null execution model, keeping every target it acts on and the bar it acts at."""
+
+    def __init__(self, acted: list) -> None:
+        super().__init__()
+        object.__setattr__(self, "_acted", acted)
+
+    def execute(self, target, bar, account):
+        self._acted.append((target, bar.period_end))  # ty: ignore[unresolved-attribute]
+        return super().execute(target, bar, account)
+
+
+def _allocated(
+    *,
+    allocation: object = None,
+    risk: object = None,
+    windows=None,
+    log=None,
+    simulator=None,
+    events: list | None = None,
+):
+    """A loop over the declared stream with an allocation configured, walked once."""
+    from liq.evolution.ecology.adapters import NullPortfolioRisk
+    from liq.evolution.ecology.logctx import SILENT, RunLog
+
+    config = _turnover()
+    learns = LearningConfig()
+    held = PopulationConfig(history_capacity=streams.HISTORY_CAPACITY)
+    state = agent.PopulationState.founded(
+        streams.founders(config.band_lower), population=held, learning=learns
+    )
+    port = ArrayGenomePopulation(
+        state=state, descriptor_schema_version=streams.DESCRIPTOR_SCHEMA_VERSION
+    )
+    loop = ecology.steady_state.SteadyState(
+        population=port,
+        state=state,
+        deflator=streams.ScriptedDeflator(
+            streams.per_sample(streams.negative_is_worse)
+        ),
+        config=EcologyConfig(
+            run_id="allocated",
+            population=held,
+            learning=learns,
+            turnover=config,
+            allocation=_allocation_config() if allocation is None else allocation,  # ty: ignore[invalid-argument-type]
+        ),
+        instrument=streams.INSTRUMENT,
+        sizer=NullRiskSizer(),
+        simulator=NullExecutionSimulator() if simulator is None else simulator,
+        opening_equity=1.0,
+        log=SILENT if log is None else RunLog(run_id="allocated", writer=log),
+        portfolio_risk=NullPortfolioRisk() if risk is None else risk,  # ty: ignore[unknown-argument]
+    )
+    if events is not None:
+        turn_over, observe, step = loop._turn_over, state.observe, state.step
+
+        def turning(window):
+            events.append(("turnover", window.as_of))
+            turn_over(window)
+
+        def observing(as_of, outcomes):
+            events.append(("settle", as_of))
+            return observe(as_of, outcomes)
+
+        def stepping(window, instrument):
+            events.append(("decide", window.as_of))
+            return step(window, instrument)
+
+        loop._turn_over = turning  # ty: ignore[invalid-assignment]
+        state.observe = observing  # ty: ignore[invalid-assignment]
+        state.step = stepping  # ty: ignore[invalid-assignment]
+    stream = streams.priced(count=DECISION_POINTS) if windows is None else windows
+    watched = streams.Watched(stream, state)
+    return loop, watched, stream, loop.run(watched)
+
+
+def test_an_allocated_loop_updates_after_settlement_and_turnover_and_before_deciding() -> (
+    None
+):
+    """At every decision point: settle, turn over, allocate, decide, then form the book."""
+    events: list = []
+    _, _, stream, _ = _allocated(log=_Lines(events), events=events)
+    allocations = [
+        each for each in events if each[0] == "log" and each[1] == "allocate"
+    ]
+    assert allocations, "no allocation event was recorded"
+    for window in stream:
+        stamp = window.as_of.isoformat()
+        at = [
+            index
+            for index, each in enumerate(events)
+            if (each[0] != "log" and each[1] == window.as_of)
+            or (each[0] == "log" and each[3].get("bar_ts") == stamp)
+        ]
+        kinds = [
+            (
+                events[i][0],
+                events[i][1],
+                events[i][2] if events[i][0] == "log" else None,
+            )
+            for i in at
+        ]
+        weighted = [
+            k
+            for k in kinds
+            if k[:2] == ("log", "allocate") and k[2] == "decision_point_shown"
+        ]
+        booked = [
+            k for k in kinds if k[:2] == ("log", "allocate") and k[2] == "intent_sized"
+        ]
+        assert len(weighted) == 1 and len(booked) == 1, (window.as_of, kinds)
+        order = [
+            k[0] if k[0] != "log" else k[2]
+            for k in kinds
+            if k[0] != "log" or k[1] == "allocate"
+        ]
+        expected = ["turnover", "decision_point_shown", "decide", "intent_sized"]
+        if order[0] == "settle":
+            expected = ["settle", *expected]
+        assert order == expected, (window.as_of, order)
+
+
+def test_the_books_target_formed_at_a_point_is_acted_on_at_the_next_bar() -> None:
+    """Every target the book is sent was formed one decision point earlier."""
+    acted: list = []
+    loop, _, stream, run = _allocated(simulator=_Acting(acted))
+    rows = run.allocation.rows  # ty: ignore[unresolved-attribute]
+    assert [row.as_of for row in rows] == [window.as_of for window in stream]
+    book = [
+        (target, at)
+        for target, at in acted
+        if target.agent_id == ecology.BOOK_ACCOUNT_ID
+    ]
+    sent = {
+        row.decision.target.as_of: row.decision.target
+        for row in rows
+        if row.decision.target is not None
+    }
+    assert book, "the book was never acted on, so the check is vacuous"
+    instants = [window.as_of for window in stream]
+    for target, at in book:
+        index = instants.index(target.as_of)
+        assert stream[index + 1].bars[streams.INSTRUMENT].period_end == at
+        assert sent[target.as_of] == target
+    assert len(book) == sum(1 for row in rows[:-1] if row.decision.target is not None)
+    assert loop.allocation is not None
+
+
+def test_births_and_deaths_move_weight_exactly_as_the_record_says() -> None:
+    """Rebuilt from the record's text over the observed living: newborns at s/P exactly."""
+    from tests.ecology.test_population_accounts import _rebuilt
+    from tests.support import weight_oracle as oracle
+
+    _, watched, stream, run = _allocated()
+    living_at = [
+        tuple(sorted(watched.living[index + 1])) for index in range(len(stream))
+    ]
+    rebuilt = _rebuilt(stream, run.evaluation, living_at)
+    warmup = int(oracle.read_record().contract["scale_warmup"])  # ty: ignore[invalid-argument-type]
+    after_warmup = [
+        index
+        for index in range(warmup, len(stream))
+        if watched.births(index) and watched.deaths(index)
+    ]
+    assert after_warmup, (
+        "no trigger fell after the warm-up, so no loss step met a turnover"
+    )
+    found: list[str] = []
+    for index, (state, (expected, newborns, share)) in enumerate(
+        zip(run.allocation.weights, rebuilt, strict=True)  # ty: ignore[unresolved-attribute]
+    ):
+        assert newborns == watched.births(index) or index == 0, index
+        implemented = dict(zip(state.agent_ids, state.weights.tolist(), strict=True))
+        found += [
+            f"@{index} {each}"
+            for each in oracle.mismatches(
+                expected,
+                implemented,
+                newborns=newborns if index else frozenset(),
+                share_rate=share,
+            )
+        ]
+    assert not found, "\n".join(found[:10])
+
+
+def test_weights_and_ledger_are_plain_values_in_the_loops_state() -> None:
+    """Frozen values the loop holds, with no random state; one seed, one result."""
+    import numpy as np
+
+    loop, _, _, run = _allocated()
+    held = loop.allocation
+    assert held.weights is run.allocation.weights[-1]  # ty: ignore[unresolved-attribute]
+    for value in (*vars(held).values(), *vars(held.ledger).values()):
+        assert not isinstance(value, np.random.Generator | np.random.RandomState)
+    _, _, _, again = _allocated()
+    assert [w.weights.tobytes() for w in again.allocation.weights] == [  # ty: ignore[unresolved-attribute]
+        w.weights.tobytes()
+        for w in run.allocation.weights  # ty: ignore[unresolved-attribute]
+    ]
+    assert again.allocation.rows == run.allocation.rows  # ty: ignore[unresolved-attribute]
+
+
+def test_allocation_changes_nothing_turnover_decides() -> None:
+    """Turnover never reads the weights: the report is the same with or without them."""
+    _, _, _, on = _allocated()
+    off = _run()
+    assert repr(on.report) == repr(off.run.report)  # ty: ignore[unresolved-attribute]
+
+
+def _with_allocation(monkeypatch) -> None:
+    """Route :mod:`record_trace`'s walks through a loop with an allocation configured."""
+    import functools
+
+    from liq.evolution.ecology.adapters import NullPortfolioRisk
+
+    configured = _allocation_config()
+    original = record_trace.ecology_config
+    monkeypatch.setattr(
+        record_trace,
+        "ecology_config",
+        lambda **keys: original(**keys, allocation=configured),
+    )
+    monkeypatch.setattr(
+        ecology.steady_state,
+        "SteadyState",
+        functools.partial(
+            ecology.steady_state.SteadyState, portfolio_risk=NullPortfolioRisk()
+        ),
+    )
+
+
+def test_with_no_allocation_the_turnover_report_is_the_frozen_offer_free_one(
+    monkeypatch,
+) -> None:
+    """The differential: unconfigured, the report is the frozen offer-free one, to the byte; configured, too."""
+    off = record_trace.reference_walk()
+    assert off.run.allocation is None  # ty: ignore[unresolved-attribute]
+    assert off.run.evaluation.book is None  # ty: ignore[unresolved-attribute]
+    assert (
+        record_trace.report_digest(off.run.report)  # ty: ignore[unresolved-attribute]
+        == record_trace.OFFER_FREE_REPORT_DIGEST
+    )
+    _with_allocation(monkeypatch)
+    on = record_trace.reference_walk()
+    assert on.run.allocation is not None  # ty: ignore[unresolved-attribute]
+    assert (
+        record_trace.report_digest(on.run.report)  # ty: ignore[unresolved-attribute]
+        == record_trace.OFFER_FREE_REPORT_DIGEST
+    )
+
+
+def test_the_allocation_reads_no_record_contents(monkeypatch) -> None:
+    """Discarding every offer changes no weight and no ledger row."""
+    _with_allocation(monkeypatch)
+    kept = record_trace.walk(diversity_record="record_only")
+    discarded = record_trace.walk(diversity_record="record_only", discard_offers=True)
+    assert kept.trace.offers, "nothing was offered, so the comparison was vacuous"
+    assert kept.population.recorded() != discarded.population.recorded()
+    one, other = kept.run.allocation, discarded.run.allocation  # ty: ignore[unresolved-attribute]
+    assert [w.weights.tobytes() for w in one.weights] == [
+        w.weights.tobytes() for w in other.weights
+    ]
+    assert one.rows == other.rows
+
+
+def test_an_allocation_without_a_portfolio_risk_port_is_refused() -> None:
+    """The book's bounds are the port's: an allocation with nothing to bound it is refused."""
+    state = _founded_for_the_record()
+    with pytest.raises(ValueError, match="portfolio-risk"):
+        ecology.steady_state.SteadyState(
+            population=ArrayGenomePopulation(
+                state=state, descriptor_schema_version="d"
+            ),
+            state=state,
+            deflator=NullFitnessDeflator(),
+            config=record_trace.ecology_config(
+                run_id="refused", turnover=_turnover(), allocation=_allocation_config()
+            ),
+            instrument=streams.INSTRUMENT,
+            sizer=NullRiskSizer(),
+            simulator=NullExecutionSimulator(),
+            opening_equity=1.0,
+        )
+
+
+def test_a_portfolio_risk_port_without_an_allocation_is_refused() -> None:
+    """A port handed to a loop with no book would be read by nothing."""
+    from liq.evolution.ecology.adapters import NullPortfolioRisk
+
+    state = _founded_for_the_record()
+    with pytest.raises(ValueError, match="no allocation"):
+        ecology.steady_state.SteadyState(
+            population=ArrayGenomePopulation(
+                state=state, descriptor_schema_version="d"
+            ),
+            state=state,
+            deflator=NullFitnessDeflator(),
+            config=record_trace.ecology_config(run_id="refused", turnover=_turnover()),
+            instrument=streams.INSTRUMENT,
+            sizer=NullRiskSizer(),
+            simulator=NullExecutionSimulator(),
+            opening_equity=1.0,
+            portfolio_risk=NullPortfolioRisk(),  # ty: ignore[unknown-argument]
+        )
+
+
+def test_record_only_without_a_turnover_configuration_is_refused() -> None:
+    """Offers are made at triggers; a pass with no turnover has none and offers nothing."""
+    with pytest.raises(ValueError, match="turnover"):
+        EcologyConfig(run_id="refused", diversity_record="record_only")

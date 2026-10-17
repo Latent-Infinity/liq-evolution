@@ -867,3 +867,26 @@ def test_an_undeclared_record_keeps_its_two_axes() -> None:
     assert population.archive.n_dims == 2
     assert population.coverage().axes == (FEATURES_READ, EXPOSURE_WANTED)
     assert population.descriptor("only").schema_version == DESCRIPTOR_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize("offset", [-1, 1])
+def test_a_declaration_keeping_another_history_than_its_store_is_refused(
+    offset: int,
+) -> None:
+    """The declaration's capacity is the store's: a window past what it keeps describes nobody."""
+    declaration = _declaration()
+    state = PopulationState.founded(
+        streams.founders(3),
+        population=PopulationConfig(
+            history_capacity=declaration.history_capacity + offset
+        ),
+        learning=LearningConfig(),
+    )
+    assert state.history_capacity != declaration.history_capacity
+    with pytest.raises(ValueError, match="history_capacity"):
+        ArrayGenomePopulation(
+            state=state,
+            descriptor_schema_version=descriptors.VOCABULARY,
+            descriptors=declaration,
+            descriptor_bins=DECIDED_BINS,
+        )

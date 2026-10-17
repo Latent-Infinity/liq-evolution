@@ -176,6 +176,10 @@ class RecordPort(streams.Recording):
     def excluded(self):
         return self.inner.excluded()  # ty: ignore[unresolved-attribute]
 
+    @property
+    def descriptor_declaration(self):
+        return self.inner.descriptor_declaration  # ty: ignore[unresolved-attribute]
+
 
 @dataclass(frozen=True)
 class Expected:

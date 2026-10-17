@@ -87,8 +87,13 @@ from liq.evolution.ecology.agent import (
     AgentBirth,
     PopulationState,
 )
-from liq.evolution.ecology.config import LearningConfig
-from liq.evolution.ecology.descriptors import DescriptorUnavailable
+from liq.evolution.ecology.config import LearningConfig, PopulationConfig
+from liq.evolution.ecology.descriptors import (
+    VOCABULARY,
+    DescriptorDeclaration,
+    DescriptorUnavailable,
+    Mandate,
+)
 from liq.evolution.ecology.errors import EcologyError
 
 RECORDED_AT = datetime(2000, 1, 1, tzinfo=UTC)
@@ -986,6 +991,27 @@ class AgentPopulationContract:
         assert occupancy.occupied == 0
         assert occupancy.undescribed == len(population.agent_ids())
 
+    def test_the_population_states_the_declaration_it_is_described_under(
+        self, adapter: AgentPopulation
+    ) -> None:
+        """One declaration, the population's own, read from the port and agreeing with it.
+
+        ``None`` states that the population is not described on the declared
+        axes, so none of its coordinates is in the declared vocabulary; a
+        declaration states that every one is.
+        """
+        declared = getattr(adapter, "descriptor_declaration")  # noqa: B009
+        assert declared is None or isinstance(declared, DescriptorDeclaration)
+        vocabularies = {
+            adapter.descriptor(agent_id).schema_version
+            for agent_id in adapter.agent_ids()
+        }
+        if declared is None:
+            assert VOCABULARY not in vocabularies
+        else:
+            assert vocabularies == {VOCABULARY}
+        assert getattr(adapter, "descriptor_declaration") is declared  # noqa: B009
+
 
 class TestNullAgentPopulation(AgentPopulationContract):
     """The stand-in, held to the same contract as any provider-backed population."""
@@ -1284,6 +1310,115 @@ def test_a_living_agent_the_record_cannot_bin_is_excluded_never_clamped(
     population = build()
     occupancy = population.occupancy()
     assert occupancy.excluded == 1
+    assert occupancy.described == len(population.agent_ids()) - 1
+    assert (
+        occupancy.occupied,
+        occupancy.described,
+        occupancy.undescribed,
+        occupancy.excluded,
+    ) == occupancy_oracle(population, record_cell)
+
+
+#: How many outcomes the declared population below keeps per agent, and the
+#: descriptor window it is described over: declared placeholders.
+DECLARED_CAPACITY = 16
+DECLARED_WINDOW = 4
+
+
+def a_declared_array_genome_population() -> tuple[
+    ArrayGenomePopulation, DescriptorDeclaration
+]:
+    """The contract's array population, described on the declared axes, and its declaration."""
+    declaration = DescriptorDeclaration(
+        window=DECLARED_WINDOW,
+        history_capacity=DECLARED_CAPACITY,
+        asset_classes=("contract-class",),
+        universe=MappingProxyType({"CONTRACT-A": "contract-class"}),
+        mandate=Mandate(
+            max_position=1.0,
+            max_gross_exposure=1.0,
+            max_weight_delta=2.0,
+            max_turnover=1.0,
+        ),
+    )
+    population = ArrayGenomePopulation(
+        state=PopulationState.founded(
+            design_founders(
+                features=ARRAY_FEATURES,
+                learning=LearningConfig(),
+                count=ARRAY_AGENTS,
+                seed=UNTIED_SEED,
+            ),
+            population=PopulationConfig(history_capacity=DECLARED_CAPACITY),
+        ),
+        descriptor_schema_version=VOCABULARY,
+        descriptors=declaration,
+        descriptor_bins=(3, 16, 9),
+    )
+    return population, declaration
+
+
+def test_a_declared_population_hands_back_the_declaration_it_was_built_with() -> None:
+    """The very object, not an equal one: a second copy is not what it describes under."""
+    population, declaration = a_declared_array_genome_population()
+    assert getattr(population, "descriptor_declaration") is declaration  # noqa: B009
+
+
+@dataclass
+class _NullWithOneNaN(NullAgentPopulation):
+    """The stand-in, with its first agent described at a coordinate that is not a number."""
+
+    def descriptor(self, agent_id: str) -> Descriptor:
+        described = super().descriptor(agent_id)
+        if agent_id != self.agent_ids()[0]:
+            return described
+        return replace(
+            described,
+            values=MappingProxyType(dict.fromkeys(described.values, math.nan)),
+        )
+
+
+@dataclass
+class _ArrayWithOneNaN(ArrayGenomePopulation):
+    """The array population, with its first agent described at a coordinate that is not a number."""
+
+    def descriptor(self, agent_id: str) -> Descriptor:
+        described = super().descriptor(agent_id)
+        if agent_id != self.agent_ids()[0]:
+            return described
+        return replace(
+            described,
+            values=MappingProxyType(dict.fromkeys(described.values, math.nan)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("build", "record_cell"),
+    [
+        (lambda: _NullWithOneNaN(), null_record_cell),
+        (
+            lambda: _ArrayWithOneNaN(
+                state=an_array_genome_population().state,
+                descriptor_schema_version=ARRAY_DESCRIPTOR_SCHEMA,
+            ),
+            array_record_cell,
+        ),
+    ],
+    ids=["null", "array"],
+)
+def test_a_living_agent_at_a_nan_coordinate_is_counted_excluded(
+    build: Callable[[], AgentPopulation], record_cell: RecordCell
+) -> None:
+    """A NaN is in no cell: counted excluded, never undescribed and never clamped."""
+    population = build()
+    first = population.agent_ids()[0]
+    assert all(
+        math.isnan(value) for value in population.descriptor(first).values.values()
+    )
+    assert record_cell(population, population.descriptor(first)) is None
+    occupancy = population.occupancy()
+    assert occupancy.excluded == 1
+    assert occupancy.undescribed == 0
     assert occupancy.described == len(population.agent_ids()) - 1
     assert (
         occupancy.occupied,

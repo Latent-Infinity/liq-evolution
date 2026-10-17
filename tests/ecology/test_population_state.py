@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import numpy as np
 import pytest
 
+from liq.evolution import ecology
 from liq.evolution.ecology.adapters import NullBarSource
 from liq.evolution.ecology.agent import (
     ENTRY_THRESHOLD,
@@ -469,6 +470,25 @@ def test_a_population_that_is_not_one_is_refused_rather_than_held() -> None:
     # and a restore does not pass through the configuration that made one.
     with pytest.raises(ValueError, match="retains nothing"):
         PopulationState.restored(replace(_snapshot_of(_founded()), history_capacity=0))
+
+
+def test_a_founder_carrying_the_books_identity_is_refused() -> None:
+    """The aggregate book's account name is reserved, so no founder may take it."""
+    with pytest.raises(ValueError, match="reserved for the aggregate book"):
+        _founded(_birth("ordinary"), _birth(ecology.BOOK_ACCOUNT_ID))
+
+
+def test_a_snapshot_carrying_the_books_identity_is_refused_on_restore() -> None:
+    """A restore admits no agent under the book's reserved name either."""
+    put_away = _snapshot_of(_founded(_birth("ordinary"), _birth("second")))
+    PopulationState.restored(put_away)
+    first, second = put_away.agents
+    spoiled = replace(
+        put_away, agents=(first, replace(second, agent_id=ecology.BOOK_ACCOUNT_ID))
+    )
+
+    with pytest.raises(ValueError, match="reserved for the aggregate book"):
+        PopulationState.restored(spoiled)
 
 
 def test_a_genome_the_layout_cannot_be_read_off_is_refused() -> None:

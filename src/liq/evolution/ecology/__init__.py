@@ -8,9 +8,10 @@ what actually happened to its own evaluation account.
 This package owns the domain's vocabulary and the capabilities it reaches the
 rest of the platform through. :mod:`liq.evolution.ecology.types` holds the
 immutable values that cross those boundaries; :mod:`liq.evolution.ecology.ports`
-holds the six capabilities themselves — supplying decision points, deciding
+holds the seven capabilities themselves — supplying decision points, deciding
 what may be held, acting on it, keeping the population, drawing from a declared
-null, and deflating the fitness a population is compared on. Domain and
+null, deflating the fitness a population is compared on, and constraining the
+aggregate book the population nets into. Domain and
 use-case code depends on these protocols only.
 Adapters that translate a particular library into them live at the edges, and
 which adapter is used is decided where the run is assembled, never here.
@@ -20,7 +21,9 @@ which adapter is used is decided where the run is assembled, never here.
 :mod:`liq.evolution.ecology.learning`, :mod:`liq.evolution.ecology.substrate`,
 :mod:`liq.evolution.ecology.features`, :mod:`liq.evolution.ecology.genome_schema`,
 :mod:`liq.evolution.ecology.population_accounts`,
-:mod:`liq.evolution.ecology.steady_state`, :mod:`liq.evolution.ecology.inheritance`
+:mod:`liq.evolution.ecology.steady_state`, :mod:`liq.evolution.ecology.inheritance`,
+:mod:`liq.evolution.ecology.fixed_share` (the aggregator),
+:mod:`liq.evolution.ecology.book_ledger` (the aggregate book's ledger)
 and :mod:`liq.evolution.ecology.errors`
 are reached as attributes of this package rather than re-exported name by name. The boundary ``__all__`` names is
 the ports and the values that cross them, and it is asserted to be exactly that;
@@ -31,10 +34,12 @@ reader can tell a capability from a contract by how it is written down.
 from liq.evolution.ecology import (  # noqa: F401
     accounts,
     agent,
+    book_ledger,
     config,
     driver,
     errors,
     features,
+    fixed_share,
     genome_schema,
     inheritance,
     learning,
@@ -47,18 +52,22 @@ from liq.evolution.ecology.ports import (
     BarSource,
     ExecutionSimulator,
     FitnessDeflator,
+    PortfolioRisk,
     RiskSizer,
     SurrogateSource,
 )
 from liq.evolution.ecology.types import (
+    BOOK_ACCOUNT_ID,
     AccountState,
     AgentId,
     ArchiveEntry,
     Bar,
     BarWindow,
+    ConstrainedBook,
     CostProvenance,
     CostScenarioId,
     DeflatedFitness,
+    DeRiskEvent,
     Descriptor,
     Fill,
     FitnessSample,
@@ -66,6 +75,7 @@ from liq.evolution.ecology.types import (
     InstrumentId,
     Intent,
     LivingOccupancy,
+    NettedBook,
     NotFilled,
     NullDeclaration,
     Offspring,
@@ -81,6 +91,7 @@ from liq.evolution.ecology.types import (
 )
 
 __all__ = [
+    "BOOK_ACCOUNT_ID",
     "AccountState",
     "AgentId",
     "AgentPopulation",
@@ -88,8 +99,10 @@ __all__ = [
     "Bar",
     "BarSource",
     "BarWindow",
+    "ConstrainedBook",
     "CostProvenance",
     "CostScenarioId",
+    "DeRiskEvent",
     "DeflatedFitness",
     "Descriptor",
     "ExecutionSimulator",
@@ -100,9 +113,11 @@ __all__ = [
     "InstrumentId",
     "Intent",
     "LivingOccupancy",
+    "NettedBook",
     "NotFilled",
     "NullDeclaration",
     "Offspring",
+    "PortfolioRisk",
     "PositionTarget",
     "RecordCoverage",
     "RecordPayload",

@@ -2,7 +2,8 @@
 
 Each port names a capability the ecology needs — supply me decision points,
 tell me what I may hold, act on it, keep my population, draw me a declared null,
-deflate the fitness I compare on — and says nothing about who provides it. Every signature is written in the
+deflate the fitness I compare on, constrain the book my population nets into —
+and says nothing about who provides it. Every signature is written in the
 domain's own value types, so an adapter can be replaced without a line of
 domain or use-case code changing, and a provider's vocabulary cannot leak
 inward by being mentioned in a signature.
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from liq.evolution.ecology.errors import EcologyError
 from liq.evolution.ecology.types import (
@@ -32,6 +33,7 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Bar,
     BarWindow,
+    ConstrainedBook,
     CostProvenance,
     CostScenarioId,
     DeflatedFitness,
@@ -41,6 +43,7 @@ from liq.evolution.ecology.types import (
     Genome,
     Intent,
     LivingOccupancy,
+    NettedBook,
     NotFilled,
     NullDeclaration,
     Offspring,
@@ -51,11 +54,15 @@ from liq.evolution.ecology.types import (
     SurrogateSeries,
 )
 
+if TYPE_CHECKING:
+    from liq.evolution.ecology.descriptors import DescriptorDeclaration
+
 __all__ = [
     "AgentPopulation",
     "BarSource",
     "ExecutionSimulator",
     "FitnessDeflator",
+    "PortfolioRisk",
     "RiskSizer",
     "SurrogateSource",
 ]
@@ -154,8 +161,11 @@ class ExecutionSimulator(Protocol):
       was formed; an adapter is therefore entitled to require that a target have
       aged by the execution model's own minimum delay, and to refuse rather than
       absorb a target that has not.
+    * The account acted on is one account: an agent's evaluation account or
+      the aggregate book's, which is acted on and charged exactly as an
+      agent's.
     * Account state is handed in and handed back. The port keeps no hidden
-      per-agent state between calls, so a run can be resumed from a state that
+      per-account state between calls, so a run can be resumed from a state that
       was handed out rather than from a provider's private memory.
     """
 
@@ -234,7 +244,19 @@ class AgentPopulation(Protocol):
       record's cells; :meth:`restore` loads such a payload into an empty
       record as the same entries in the same order, and refuses one whose
       envelope names anything else, or a record that already holds an entry.
+    * The population states what it is described under.
+      :attr:`descriptor_declaration` is the declaration its descriptors are
+      computed under — the population's own object, never a copy — or ``None``
+      where it is not described on the declared axes, in which case none of its
+      coordinates is in the declared vocabulary. Whoever reads descriptors
+      beside the population reads them under this one declaration, so there is
+      no second copy to disagree with it.
     """
+
+    @property
+    def descriptor_declaration(self) -> DescriptorDeclaration | None:
+        """The declaration this population's descriptors are computed under, or ``None``."""
+        ...
 
     @property
     def minimum_candidates(self) -> int:
@@ -488,3 +510,70 @@ def refuse_an_undeflatable_sample(samples: Sequence[FitnessSample]) -> None:
                 f"{each.agent_id}: independent outcomes must number at least two "
                 "and at most the window"
             )
+
+
+@runtime_checkable
+class PortfolioRisk(Protocol):
+    """Constrain the aggregate book, netted, as one batch.
+
+    Contract:
+
+    * :meth:`constrain` is handed the whole book at one decision point — every
+      living agent's share, the netted target, the book's own account, its
+      high-water mark and whether its de-risk path has already fired — and
+      returns one :class:`~liq.evolution.ecology.types.ConstrainedBook`. It is
+      a true batch: the order the agents are handed in changes nothing.
+    * The bounds act on the book, never on an agent: no agent's own account,
+      mandate or score is read or changed here. Each agent's mandate was
+      applied before its share was formed; this is the second level.
+    * A target unlike the netted one names every reduction or refusal that
+      produced it, each as a stable code keyed by the book's identity, so a
+      book is never reduced silently. Where the de-risk path fires, the
+      outcome carries its event.
+    * :meth:`bound` names the bounds applied, in the order they are applied;
+      :meth:`not_bound` names every bound deliberately not applied, each with
+      its reason. A bound is in one list or the other, never both.
+    * A book that holds more than one instrument is refused with
+      :class:`MoreThanOneInstrument`: every bound recorded as not binding was
+      decided on a book of one, and would stand on a false premise.
+    * The bounds themselves are the risk authority's, reached by an adapter
+      in the consumer that composes the run; none is written here.
+    """
+
+    def constrain(self, book: NettedBook) -> ConstrainedBook:
+        """Decide what the netted ``book`` may be sent, and what bound it."""
+        ...
+
+    def bound(self) -> tuple[str, ...]:
+        """The bounds this adapter applies, in the order it applies them."""
+        ...
+
+    def not_bound(self) -> tuple[tuple[str, str], ...]:
+        """Every bound this adapter deliberately does not apply, with its reason."""
+        ...
+
+
+class MoreThanOneInstrument(EcologyError):
+    """A book holds more than the one instrument its bounds were decided on."""
+
+
+def refuse_a_book_of_more_than_one_instrument(book: NettedBook) -> None:
+    """Refuse a book the portfolio-risk port's contract cannot answer.
+
+    Stated once, so no two adapters disagree about what they refuse. An
+    instrument named at no exposure is not held.
+
+    Raises:
+        MoreThanOneInstrument: If the book's account holds any instrument
+            other than the one its netted target is in.
+    """
+    elsewhere = sorted(
+        instrument
+        for instrument, exposure in book.account.exposures.items()
+        if instrument != book.instrument and exposure != 0.0
+    )
+    if elsewhere:
+        raise MoreThanOneInstrument(
+            f"the book nets into {book.instrument!r} but also holds {elsewhere}; "
+            "its aggregate bounds were decided on a book of one instrument"
+        )

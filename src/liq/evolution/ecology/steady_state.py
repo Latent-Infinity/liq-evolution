@@ -60,11 +60,31 @@ on the living. With the offers off (the default) the loop offers nothing
 (``liq-docs/plans/oracle-v4-archive-interaction-2026-10-02.md``;
 ``liq-docs/plans/oracle-v4-offers-under-no-rule-2026-10-13.md``).
 
+**Allocation.** With an allocation configured, the loop allocates through
+:class:`~liq.evolution.ecology.population_accounts.FixedShareAllocation`, the one
+driver's hook: once per decision point, after settlement and the trigger's
+births and deaths and before the population decides, the one aggregator's
+weights are updated over exactly the living, from the outcomes and reference
+return recorded at that point; after the decision the aggregate book is netted
+from those weights and what each living agent was permitted, bounded by the
+portfolio-risk port the loop was handed, and banded, and its target is acted on
+at the next bar. Every allocation event is written under the ``"allocate"``
+stage. Nothing turnover decides reads the weights or the book, and the
+allocation reads no record entry. Weights and ledger are plain values the loop
+holds, with no random state. With no allocation configured, the default, there
+are no weights and no book, and the loop is the one above.
+
 **What is refused before anything runs.** A configuration whose eligible pool
 could fall short of the replacement count, one that could replace more than its
 fraction over any run of its window, or one that would make a trigger blind for
 reasons of age alone; a minimum age or fitness window too short for the
 deflator to assess an eligible agent on; and a population outside its band.
+With the record's offers on, a population not described in the declared
+vocabulary, a declaration handed to the loop that is not the population's own,
+and a record that already holds an entry are refused too: the report's
+descriptors are read under the declaration the population itself states. An
+allocation without a portfolio-risk port, and a port without an allocation,
+are refused.
 """
 
 from __future__ import annotations
@@ -90,6 +110,7 @@ from liq.evolution.ecology.ports import (
     BarSource,
     ExecutionSimulator,
     FitnessDeflator,
+    PortfolioRisk,
     RiskSizer,
 )
 from liq.evolution.ecology.types import (
@@ -114,7 +135,12 @@ from .agent_contracts import (
     Lineage,
     StartingStateOutsideItsBound,
 )
-from .population_accounts import PopulationAccounts, PopulationEvaluation
+from .population_accounts import (
+    AllocationRecord,
+    FixedShareAllocation,
+    PopulationAccounts,
+    PopulationEvaluation,
+)
 
 __all__ = [
     "BarTurnover",
@@ -478,10 +504,18 @@ class RecordOnlyTurnoverReport(TurnoverReport):
 
 @dataclass(frozen=True)
 class SteadyStateRun:
-    """One steady-state pass: every account, and what turnover did."""
+    """One steady-state pass: every account, what turnover did, and what was allocated.
+
+    Attributes:
+        evaluation: Every account, the book's among them where one was kept.
+        report: What turnover did.
+        allocation: The weights and the book's ledger at every decision
+            point, or ``None`` where no allocation was configured.
+    """
 
     evaluation: PopulationEvaluation
     report: TurnoverReport
+    allocation: AllocationRecord | None = None
 
 
 class SteadyState:
@@ -497,10 +531,16 @@ class SteadyState:
         simulator: The execution model, under its named cost scenario.
         opening_equity: What every account opens with.
         log: Where accounts write what they did.
-        descriptor_declaration: What the population's descriptors are computed
-            under, read at every trigger for the drift and raw beta the record's
-            report carries. Read only with the record's offers on, and required
-            then.
+        descriptor_declaration: Accepted so a caller that hands the loop its
+            population's declaration stays valid, and never read in its place.
+            With the record's offers on, the drift and raw beta the record's
+            report carries are read under the population's own
+            ``descriptor_declaration``; one handed here is only checked against
+            it, and refused unless equal, because a second copy cannot
+            disagree with the one the population describes under.
+        portfolio_risk: The port the aggregate book is bounded by. Required
+            where the configuration names an allocation, and refused where it
+            names none.
 
     Raises:
         ValueError: If the configuration or the population is one the records
@@ -520,6 +560,7 @@ class SteadyState:
         opening_equity: float,
         log: RunLog = SILENT,
         descriptor_declaration: declared_axes.DescriptorDeclaration | None = None,
+        portfolio_risk: PortfolioRisk | None = None,
     ) -> None:
         if config.turnover is None:
             raise ValueError(
@@ -533,13 +574,11 @@ class SteadyState:
         self.deflator = deflator
         self._refuse_what_the_records_refuse()
         self._offers_on = config.diversity_record == "record_only"
-        if self._offers_on and descriptor_declaration is None:
-            raise ValueError(
-                'diversity_record = "record_only" reports drift and raw beta at '
-                "every trigger, which are read under the population's descriptor "
-                "declaration; none was given"
-            )
-        self._declaration = descriptor_declaration
+        self._declaration = (
+            self._refuse_an_unrecordable_population(descriptor_declaration)
+            if self._offers_on
+            else None
+        )
         self._last_reading: declared_axes.Reading | None = None
         self._first_offering: RecordOnlyTrigger | None = None
         self.accounts = PopulationAccounts(
@@ -550,6 +589,7 @@ class SteadyState:
             opening_equity=opening_equity,
             log=log,
         )
+        self.allocation = self._allocation(portfolio_risk)
         living = state.agent_ids()
         self._born_index: dict[AgentId, int] = dict.fromkeys(living, 0)
         self._admission_order: dict[AgentId, int] = {
@@ -604,9 +644,76 @@ class SteadyState:
                 "selection can rank, so triggers would be blind by age alone"
             )
 
+    def _allocation(
+        self, portfolio_risk: PortfolioRisk | None
+    ) -> FixedShareAllocation | None:
+        """The allocation hook the configuration names, or ``None`` where it names none.
+
+        Raises:
+            ValueError: If an allocation is configured with no portfolio-risk
+                port, or a port is handed with no allocation configured.
+        """
+        configured = self.config.allocation
+        if configured is None:
+            if portfolio_risk is not None:
+                raise ValueError(
+                    "a portfolio-risk port was handed to a loop with no allocation "
+                    "configured; there is no book for it to bound"
+                )
+            return None
+        if portfolio_risk is None:
+            raise ValueError(
+                "an allocation is configured but no portfolio-risk port was "
+                "handed; the aggregate book's bounds are the port's"
+            )
+        return FixedShareAllocation(
+            self.accounts,
+            aggregator=configured.aggregator(),
+            risk=portfolio_risk,
+            band=configured.band,
+        )
+
+    def _refuse_an_unrecordable_population(
+        self, handed: declared_axes.DescriptorDeclaration | None
+    ) -> declared_axes.DescriptorDeclaration:
+        """The population's own declaration, once its record can be offered to.
+
+        Raises:
+            ValueError: If the population is not described in the declared
+                vocabulary, if a declaration handed to the loop is not equal
+                to the population's own, or if the record already holds an
+                entry before the run's first trigger.
+        """
+        population = self.population
+        declaration = population.descriptor_declaration
+        if declaration is None:
+            raise ValueError(
+                'diversity_record = "record_only" reports drift and raw beta at '
+                "every trigger, read under the population's own descriptor "
+                "declaration; this population states none, so it is not "
+                f"described in the declared vocabulary {declared_axes.VOCABULARY!r}"
+            )
+        if handed is not None and handed != declaration:
+            raise ValueError(
+                "the descriptor declaration handed to the loop is not the "
+                "population's own; the report is read under the population's, "
+                "and a second copy cannot disagree with it"
+            )
+        held = len(population.recorded())
+        if held:
+            raise ValueError(
+                f"the population's record holds {held} entr"
+                f"{'y' if held == 1 else 'ies'} before the run's first trigger; a "
+                "run's record starts empty and never carries from another run"
+            )
+        return declaration
+
     def run(self, source: BarSource) -> SteadyStateRun:
         """Walk ``source`` once, turning the population over at every trigger."""
-        evaluation = self.accounts.run(source, self.config, turnover=self._turn_over)
+        evaluation = self.accounts.run(
+            source, self.config, turnover=self._turn_over, allocation=self.allocation
+        )
+        allocated = None if self.allocation is None else self.allocation.record()
         report = TurnoverReport(
             triggers=tuple(self._triggers),
             deaths=tuple(self._deaths),
@@ -619,10 +726,13 @@ class SteadyState:
             inheritance=self.turnover.inheritance,
         )
         if not self._offers_on:
-            return SteadyStateRun(evaluation=evaluation, report=report)
+            return SteadyStateRun(
+                evaluation=evaluation, report=report, allocation=allocated
+            )
         first = self._first_offering
         return SteadyStateRun(
             evaluation=evaluation,
+            allocation=allocated,
             report=RecordOnlyTurnoverReport(
                 **vars(report),
                 initial_coverage=InitialCoverage(

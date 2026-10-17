@@ -39,6 +39,7 @@ from typing import ClassVar
 
 from liq.evolution.ecology.adapters import archive_codec
 from liq.evolution.ecology.ports import (
+    refuse_a_book_of_more_than_one_instrument,
     refuse_an_unanswerable_selection,
     refuse_an_undeflatable_sample,
 )
@@ -48,6 +49,7 @@ from liq.evolution.ecology.types import (
     ArchiveEntry,
     Bar,
     BarWindow,
+    ConstrainedBook,
     CostProvenance,
     CostScenarioId,
     DeflatedFitness,
@@ -58,6 +60,7 @@ from liq.evolution.ecology.types import (
     InstrumentId,
     Intent,
     LivingOccupancy,
+    NettedBook,
     NotFilled,
     NullDeclaration,
     Offspring,
@@ -76,6 +79,7 @@ __all__ = [
     "NullBarSource",
     "NullExecutionSimulator",
     "NullFitnessDeflator",
+    "NullPortfolioRisk",
     "NullRiskSizer",
     "NullSurrogateSource",
 ]
@@ -463,6 +467,11 @@ class NullAgentPopulation:
         self._excluded = []
 
     @property
+    def descriptor_declaration(self) -> None:
+        """``None``: the stand-in is described in its own vocabulary, not the declared axes."""
+        return None
+
+    @property
     def minimum_candidates(self) -> int:
         """One: a uniform draw can choose among a single agent with a figure."""
         return _FEWEST_TO_DRAW_FROM
@@ -704,3 +713,40 @@ class NullFitnessDeflator:
             )
             for each in samples
         )
+
+
+@dataclass(frozen=True)
+class NullPortfolioRisk:
+    """Apply no aggregate bound to the book, and say so.
+
+    Every book comes back as it was netted, with nothing recorded, because
+    nothing bound it; :meth:`bound` names nothing and :meth:`not_bound` says
+    that no aggregate bound is applied at all, so a run wired to this stand-in
+    cannot be read as one whose book was constrained. It still refuses a book
+    of more than one instrument, as every adapter of the port does.
+    """
+
+    #: The one entry :meth:`not_bound` reports: every aggregate bound at once.
+    NOTHING_APPLIED: ClassVar[tuple[str, str]] = (
+        "aggregate_bounds",
+        "a stand-in applies no aggregate bound: the book stands as netted",
+    )
+
+    def constrain(self, book: NettedBook) -> ConstrainedBook:
+        """Return ``book``'s netted target as its target, with nothing recorded."""
+        refuse_a_book_of_more_than_one_instrument(book)
+        return ConstrainedBook(
+            as_of=book.as_of,
+            instrument=book.instrument,
+            netted=book.netted,
+            target=book.netted,
+            rejections=(),
+        )
+
+    def bound(self) -> tuple[str, ...]:
+        """Nothing: this stand-in applies no bound."""
+        return ()
+
+    def not_bound(self) -> tuple[tuple[str, str], ...]:
+        """Every aggregate bound, at once, with the reason none is applied."""
+        return (self.NOTHING_APPLIED,)

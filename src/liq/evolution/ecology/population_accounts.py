@@ -45,6 +45,28 @@ prices the accounts were just marked on, never re-read from a bar source, and
 it lines up with every agent's outcomes because each living agent records an
 outcome at every decision point after its first.
 
+**The book is kept beside the accounts, when an allocation is passed.** Once
+per decision point, after turnover and before the population decides, the
+allocation is handed exactly the living, which is the instant its weights are
+updated at. After the decision it is handed what every living agent's mandate
+permitted it — the target formed now, or, where a wish was refused, what it was
+last permitted, flat before anything was — and the aggregate book's own account,
+and it returns the book's target. That target is acted on at the next bar, like
+any agent's, through the same execution model and the same account class, under
+the book's reserved identity; it is never acted on at the bar it was formed at.
+The book reads no agent's account, and no agent's account reads the book. With
+no allocation passed there is no book, and the walk is the one above.
+
+**The fixed-share allocation.** :class:`FixedShareAllocation` is the hook the
+steady-state loop allocates through. At the update instant it reads what the
+accounts recorded at this decision point and nothing else — each living
+agent's own outcome and the instrument's reference return, as
+:meth:`PopulationAccounts.recorded` holds them — and updates the one
+aggregator over exactly the living. At the book instant it hands the book's
+ledger those weights and what the living were permitted, and returns the
+target the ledger sent. It reads no wish, fill, holding, fitness figure,
+descriptor or record entry, and holds plain values only.
+
 **Outcomes go to their own agent.** Each account's per-bar outcome — the change in
 its equity from the state it last published — is appended to that agent's own
 outcome history in the population, and to nobody else's. An account opened at a
@@ -59,26 +81,43 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
+import numpy as np
+
+from liq.evolution.ecology.book_ledger import BookLedger, BookRow
 from liq.evolution.ecology.config import EcologyConfig
 from liq.evolution.ecology.driver import WalkReport, walk
 from liq.evolution.ecology.errors import EcologyError
+from liq.evolution.ecology.fixed_share import FixedShare, FixedShareState
 from liq.evolution.ecology.logctx import SILENT, RunLog
-from liq.evolution.ecology.ports import BarSource, ExecutionSimulator, RiskSizer
+from liq.evolution.ecology.ports import (
+    BarSource,
+    ExecutionSimulator,
+    PortfolioRisk,
+    RiskSizer,
+)
 from liq.evolution.ecology.step import DecisionStep, what_the_reading_earned
 from liq.evolution.ecology.types import (
+    BOOK_ACCOUNT_ID,
+    AccountState,
     AgentId,
     Bar,
     BarWindow,
     InstrumentId,
     Intent,
+    PositionTarget,
     UtcTimestamp,
 )
 
 from .account_state import Evaluation, _EvaluationAccount
+from .accounts import FLAT
 
 __all__ = [
+    "AllocationHook",
+    "AllocationRecord",
+    "FixedShareAllocation",
     "PopulationAccounts",
     "PopulationEvaluation",
+    "Recorded",
     "SettledPopulationWide",
 ]
 
@@ -142,6 +181,39 @@ def _no_turnover(window: BarWindow) -> None:
     """Change nobody at a decision point."""
 
 
+class AllocationHook(Protocol):
+    """Where the aggregate book is allocated and formed, at a decision point.
+
+    Two instants, each once per decision point. :meth:`allocate` is called
+    after settlement and the trigger's turnover, and before the population
+    decides, with exactly the living: the instant the allocation's weights are
+    updated at. :meth:`book` is called after the decision, with what each
+    living agent was permitted, and returns the book's target, which the next
+    bar acts on.
+    """
+
+    def allocate(self, window: BarWindow, living: tuple[AgentId, ...]) -> None:
+        """Update the allocation at ``window``, over exactly ``living``."""
+        ...
+
+    def book(
+        self,
+        window: BarWindow,
+        permitted: Mapping[AgentId, float],
+        account: AccountState,
+    ) -> PositionTarget | None:
+        """Return the book's target formed at ``window``, or ``None`` to send none.
+
+        Args:
+            window: The decision point.
+            permitted: Every living agent to the exposure its mandate permits
+                it, as a fraction of its own equity, which the book reads as a
+                fraction of the capital it allocates the agent.
+            account: The book's own account, as published at ``window``.
+        """
+        ...
+
+
 @dataclass(frozen=True)
 class PopulationEvaluation:
     """What every account did over one pass, alive or dead at its end.
@@ -155,12 +227,37 @@ class PopulationEvaluation:
             after which its account took no further state. An agent dead at the
             pass's last decision point has no closing bar and is absent.
         history: What the pass covered, as the walk reported it.
+        book: The aggregate book's account over the pass, or ``None`` where
+            no allocation was passed and there is no book.
     """
 
     accounts: Mapping[AgentId, Evaluation]
     opened_at: Mapping[AgentId, UtcTimestamp | None]
     closed_at: Mapping[AgentId, UtcTimestamp]
     history: WalkReport
+    book: Evaluation | None = None
+
+
+@dataclass(frozen=True)
+class Recorded:
+    """What the accounts recorded at one decision point, before anyone decides at it.
+
+    Attributes:
+        as_of: The decision instant (UTC), or ``None`` before the first.
+        outcomes: Each agent that recorded an outcome there, to that outcome:
+            the change in its account's equity over the bar just accounted.
+            Founders at a pass's first decision point and agents born there
+            have none.
+        reference: The instrument's return over the decision point, or
+            ``None`` at a pass's first, which has no previous close.
+    """
+
+    as_of: UtcTimestamp | None
+    outcomes: Mapping[AgentId, float]
+    reference: float | None
+
+
+_NOTHING_RECORDED = Recorded(as_of=None, outcomes=MappingProxyType({}), reference=None)
 
 
 @dataclass(frozen=True)
@@ -236,10 +333,17 @@ class PopulationAccounts:
         self._closing: set[AgentId] = set()
         self._closed_at: dict[AgentId, UtcTimestamp] = {}
         self._wishes: Mapping[AgentId, Intent] = MappingProxyType({})
+        self._permitted: Mapping[AgentId, float] = MappingProxyType({})
+        self._book: _EvaluationAccount | None = None
         self._history: WalkReport | None = None
+        self._recorded: Recorded = _NOTHING_RECORDED
         for agent_id in population.agent_ids():
             self._accounts[agent_id] = self._account(agent_id)
             self._opened_at[agent_id] = None
+
+    def recorded(self) -> Recorded:
+        """What the latest decision point recorded: outcomes and the reference return."""
+        return self._recorded
 
     def member(self, agent_id: AgentId) -> _Member:
         """The member an account's wishes are read through."""
@@ -294,12 +398,15 @@ class PopulationAccounts:
         config: EcologyConfig,
         *,
         turnover: Callable[[BarWindow], None] = _no_turnover,
+        allocation: AllocationHook | None = None,
     ) -> PopulationEvaluation:
         """Walk ``source`` once, every account advanced at every decision point."""
         self._history = walk(
             source,
             config,
-            visit=lambda window: self.visit(window, turnover=turnover),
+            visit=lambda window: self.visit(
+                window, turnover=turnover, allocation=allocation
+            ),
             log=self.log,
         )
         return PopulationEvaluation(
@@ -309,24 +416,33 @@ class PopulationAccounts:
             opened_at=MappingProxyType(dict(self._opened_at)),
             closed_at=MappingProxyType(dict(self._closed_at)),
             history=self._history,
+            book=None if self._book is None else self._evaluated(self._book),
         )
 
     def evaluation(self, agent_id: AgentId) -> Evaluation:
         """One agent's account as it stands, alive or dead."""
+        return self._evaluated(self._accounts[agent_id])
+
+    def _evaluated(self, account: _EvaluationAccount) -> Evaluation:
         history = self._history or WalkReport(
             run_id="", visits=(), crossings=(), window_carries_across_segments=True
         )
-        return self._accounts[agent_id].evaluation(
-            history, opening_equity=self.opening_equity
-        )
+        return account.evaluation(history, opening_equity=self.opening_equity)
 
     def visit(
         self,
         window: BarWindow,
         *,
         turnover: Callable[[BarWindow], None] = _no_turnover,
+        allocation: AllocationHook | None = None,
     ) -> None:
-        """Advance every account through one decision point, in the shared order."""
+        """Advance every account through one decision point, in the shared order.
+
+        The aggregate book's account opens at the first decision point an
+        allocation is passed at, at the founders' notional.
+        """
+        if allocation is not None and self._book is None:
+            self._book = self._account(BOOK_ACCOUNT_ID)
         living = self.population.agent_ids()
         bar = self._accounts[living[0]]._priced(window)
         for agent_id in living:
@@ -335,8 +451,10 @@ class PopulationAccounts:
             window,
             bar,
             settle=self._settle,
-            meanwhile=lambda: self._account_then_turn_over(bar, window, turnover),
-            decide=lambda: self._decide(window),
+            meanwhile=lambda: self._account_then_turn_over(
+                bar, window, turnover, allocation
+            ),
+            decide=lambda: self._decide(window, allocation),
         )
 
     def _settle(self, as_of: UtcTimestamp, outcome: float) -> None:
@@ -346,15 +464,22 @@ class PopulationAccounts:
         )
 
     def _account_then_turn_over(
-        self, bar: Bar, window: BarWindow, turnover: Callable[[BarWindow], None]
+        self,
+        bar: Bar,
+        window: BarWindow,
+        turnover: Callable[[BarWindow], None],
+        allocation: AllocationHook | None,
     ) -> None:
-        """Account every open account for the bar, record outcomes, then turn over."""
+        """Account every open account for the bar, record outcomes, turn over, allocate."""
         living = self.population.agent_ids()
         for agent_id in (*living, *sorted(self._closing)):
             self._accounts[agent_id]._account_for_the_bar(bar, window.as_of)
+        if self._book is not None:
+            self._book._account_for_the_bar(bar, window.as_of)
         for agent_id in sorted(self._closing):
             self._closed_at[agent_id] = window.as_of
         self._closing.clear()
+        outcomes: dict[AgentId, float] = {}
         for agent_id in living:
             account = self._accounts[agent_id]
             self.population.hold(agent_id, account.held)
@@ -362,29 +487,68 @@ class PopulationAccounts:
                 # A founder at the first decision point: nothing came before it.
                 continue
             earlier, later = account.states[-2:]
-            self.population.record_outcome(
-                agent_id, later.equity / earlier.equity - 1.0
-            )
+            outcomes[agent_id] = later.equity / earlier.equity - 1.0
+            self.population.record_outcome(agent_id, outcomes[agent_id])
+        reference = None
         if self.step.previous_close is not None:
             # The reference every agent's beta is estimated against: the move
             # the instrument made over the interval this decision point's
             # outcomes span, on the prices the accounts were just marked on.
             # Once per decision point, before turnover, and none at a pass's
             # first, which has no previous close and records no outcome.
-            self.population.record_reference_return(
-                what_the_reading_earned(self.step.previous_close, bar.close)
-            )
+            reference = what_the_reading_earned(self.step.previous_close, bar.close)
+            self.population.record_reference_return(reference)
+        self._recorded = Recorded(
+            as_of=window.as_of,
+            outcomes=MappingProxyType(outcomes),
+            reference=reference,
+        )
         turnover(window)
+        if allocation is not None:
+            allocation.allocate(window, self.population.agent_ids())
 
-    def _decide(self, window: BarWindow) -> None:
-        """Form every living agent's wish at once, and each account's target from it."""
+    def _decide(self, window: BarWindow, allocation: AllocationHook | None) -> None:
+        """Form every living agent's wish at once, each account's target, then the book's."""
         step = self.population.step(window, self.instrument)
         self._wishes = MappingProxyType(
             dict(zip(step.agent_ids, step.intents(), strict=True))
         )
+        permitted: dict[AgentId, float] = {}
         for agent_id in step.agent_ids:
             account = self._accounts[agent_id]
             account._form_the_target_the_next_bar_acts_on(window, account.states[-1])
+            # A refusal holds, so what was last permitted stands; flat before
+            # anything was.
+            permitted[agent_id] = (
+                self._permitted.get(agent_id, FLAT)
+                if account.pending is None
+                else account.pending.target_exposure
+            )
+        self._permitted = MappingProxyType(permitted)
+        if allocation is not None and self._book is not None:
+            self._form_the_book(window, allocation, self._book)
+
+    def _form_the_book(
+        self, window: BarWindow, allocation: AllocationHook, book: _EvaluationAccount
+    ) -> None:
+        """Hold the book's target for the next bar, refusing one that is not the book's now.
+
+        Raises:
+            ValueError: If the target is not keyed by the book's identity, is in
+                another instrument, or was not formed at this decision point.
+        """
+        target = allocation.book(window, self._permitted, book.states[-1])
+        if target is not None and (
+            target.agent_id != BOOK_ACCOUNT_ID
+            or target.instrument != self.instrument
+            or target.as_of != window.as_of
+        ):
+            raise ValueError(
+                f"the book is sent its own target in {self.instrument!r}, formed "
+                f"at {window.as_of.isoformat()}; got {target.agent_id!r}'s in "
+                f"{target.instrument!r}, formed at {target.as_of.isoformat()}"
+            )
+        book.pending = target
 
     def _account(self, agent_id: AgentId) -> _EvaluationAccount:
         return _EvaluationAccount(
@@ -395,4 +559,143 @@ class PopulationAccounts:
             equity=self.opening_equity,
             log=self.log,
             step=self.step,
+        )
+
+
+@dataclass(frozen=True)
+class AllocationRecord:
+    """What a fixed-share allocation did over a pass, one entry per decision point.
+
+    Attributes:
+        weights: The weights the book consumed at each decision point, over
+            exactly the living after that point's turnover.
+        rows: The book's ledger row at each decision point.
+        recorded: What each update read: the outcomes and reference return
+            the accounts recorded at that decision point.
+    """
+
+    weights: tuple[FixedShareState, ...]
+    rows: tuple[BookRow, ...]
+    recorded: tuple[Recorded, ...]
+
+
+class FixedShareAllocation:
+    """The allocation hook: the one aggregator's weights, and the book's ledger.
+
+    Args:
+        accounts: The accounts the hook is handed to, read only through
+            :meth:`PopulationAccounts.recorded` and their configured
+            instrument, notional and execution model's cost provenance.
+        aggregator: The aggregator, at the frozen record's values.
+        risk: The portfolio-risk port the netted book is handed to.
+        band: The book's rebalance band, as configured.
+
+    The weights start uniform over the founders, and the ledger opens flat at
+    the accounts' notional, charging what the execution model states it
+    charges. Both are frozen values, replaced at each decision point.
+    """
+
+    def __init__(
+        self,
+        accounts: PopulationAccounts,
+        *,
+        aggregator: FixedShare,
+        risk: PortfolioRisk,
+        band: float,
+    ) -> None:
+        self._accounts = accounts
+        self._aggregator = aggregator
+        self._risk = risk
+        self.weights: FixedShareState = aggregator.start(
+            accounts.population.agent_ids()
+        )
+        self.ledger: BookLedger = BookLedger.open(
+            instrument=accounts.instrument,
+            band=band,
+            cost=accounts.simulator.cost_provenance(),
+            opening_equity=accounts.opening_equity,
+        )
+        self._weights: list[FixedShareState] = []
+        self._rows: list[BookRow] = []
+        self._read: list[Recorded] = []
+
+    def allocate(self, window: BarWindow, living: tuple[AgentId, ...]) -> None:
+        """Update the weights over exactly ``living``, from what this point recorded.
+
+        Raises:
+            ValueError: If what the accounts recorded is not this decision
+                point's.
+        """
+        recorded = self._accounts.recorded()
+        if recorded.as_of != window.as_of:
+            raise ValueError(
+                f"the update at {window.as_of.isoformat()} reads what the accounts "
+                "recorded there, but they last recorded at "
+                f"{'nothing' if recorded.as_of is None else recorded.as_of.isoformat()}"
+            )
+        outcomes = recorded.outcomes
+        ids = np.asarray(living, dtype=np.str_)
+        has = np.isin(ids, np.asarray(tuple(outcomes), dtype=np.str_))
+        # An agent with no outcome is asleep; its slot is never read.
+        returns = np.full(ids.size, np.nan)
+        returns[has] = [outcomes[agent_id] for agent_id in ids[has].tolist()]
+        self.weights = self._aggregator.update(
+            self.weights,
+            living=living,
+            returns=returns,
+            recorded=has,
+            reference=recorded.reference,
+        )
+        self._weights.append(self.weights)
+        self._read.append(recorded)
+        self._accounts.log.record(
+            "decision_point_shown", bar_ts=window.as_of, stage="allocate"
+        )
+
+    def book(
+        self,
+        window: BarWindow,
+        permitted: Mapping[AgentId, float],
+        account: AccountState,
+    ) -> PositionTarget | None:
+        """Net, bound and band the book from this point's weights.
+
+        Raises:
+            ValueError: If ``permitted`` is not keyed by exactly the agents the
+                weights were updated over.
+        """
+        weights = self.weights
+        if set(permitted) != set(weights.agent_ids):
+            raise ValueError(
+                "the book is netted over exactly the agents weighted at "
+                f"{window.as_of.isoformat()}; permitted names "
+                f"{sorted(set(permitted) ^ set(weights.agent_ids))} besides"
+            )
+        self.ledger, row = self.ledger.decide(
+            bar=window.bars[self._accounts.instrument],
+            account=account,
+            agent_ids=weights.agent_ids,
+            weights=weights.weights,
+            permitted=np.fromiter(
+                (permitted[agent_id] for agent_id in weights.agent_ids),
+                dtype=np.float64,
+                count=len(weights.agent_ids),
+            ),
+            risk=self._risk,
+        )
+        self._rows.append(row)
+        self._accounts.log.record(
+            "intent_sized",
+            bar_ts=window.as_of,
+            stage="allocate",
+            agent_id=BOOK_ACCOUNT_ID,
+        )
+        return row.decision.target
+
+    def record(self) -> AllocationRecord:
+        """Everything the allocation did so far, one entry per decision point."""
+        return AllocationRecord(
+            weights=tuple(self._weights),
+            rows=tuple(self._rows),
+            recorded=tuple(self._read),
         )

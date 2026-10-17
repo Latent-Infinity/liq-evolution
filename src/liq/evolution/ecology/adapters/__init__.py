@@ -27,6 +27,7 @@ from liq.evolution.ecology.adapters.null import (
     NullBarSource,
     NullExecutionSimulator,
     NullFitnessDeflator,
+    NullPortfolioRisk,
     NullRiskSizer,
     NullSurrogateSource,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "NullBarSource",
     "NullExecutionSimulator",
     "NullFitnessDeflator",
+    "NullPortfolioRisk",
     "NullRiskSizer",
     "NullSurrogateSource",
 ]
