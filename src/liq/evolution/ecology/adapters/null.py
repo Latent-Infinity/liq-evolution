@@ -29,6 +29,9 @@ here rather than only behind a provider.
 
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
+import inspect
 import math
 import random
 from collections.abc import Iterator, Mapping, Sequence
@@ -44,6 +47,8 @@ from liq.evolution.ecology.ports import (
     refuse_an_undeflatable_sample,
 )
 from liq.evolution.ecology.types import (
+    AUTHORIZED_BY,
+    GENERATED_LABEL,
     AccountState,
     AgentId,
     ArchiveEntry,
@@ -56,6 +61,7 @@ from liq.evolution.ecology.types import (
     Descriptor,
     Fill,
     FitnessSample,
+    GeneratorFunction,
     Genome,
     InstrumentId,
     Intent,
@@ -70,9 +76,17 @@ from liq.evolution.ecology.types import (
     Rejection,
     SegmentRole,
     SizingOutcome,
+    SurrogateProvenance,
     SurrogateSeries,
     UtcTimestamp,
 )
+
+# The in-repository permutation has no source series of its own: what it states
+# about the series it was handed is declared once, here, and is the same for
+# every draw. The epoch is a declared constant, not a period of any market.
+_PERMUTATION_SYMBOL = "NULL"
+_PERMUTATION_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_PERMUTATION_PURPOSE = "declared probe series; no booked read"
 
 __all__ = [
     "NullAgentPopulation",
@@ -672,12 +686,54 @@ class NullSurrogateSource:
         """Return one reproducible surrogate of ``observed`` under this null."""
         reordered = list(observed)
         random.Random(f"{seed}:{replicate}").shuffle(reordered)
+        declaration = self.declaration()
+        canonical = "\n".join(repr(float(value)) for value in observed) + "\n"
+        shuffle = inspect.getsource(random.Random.shuffle)
+        provenance = SurrogateProvenance(
+            source_data_id=source_id,
+            symbols=(_PERMUTATION_SYMBOL,),
+            period_first_bar=_PERMUTATION_EPOCH,
+            period_last_bar=_PERMUTATION_EPOCH,
+            source_data_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            source_dataset_id=self.null_id,
+            source_read_purpose=_PERMUTATION_PURPOSE,
+            source_read_arm_id=self.null_id,
+            restart_indices=(0,),
+            method="permutation",
+            generator_version=importlib.metadata.version("liq-evolution"),
+            generator_functions=(
+                GeneratorFunction(
+                    name="random.Random.shuffle",
+                    sha256=hashlib.sha256(shuffle.encode("utf-8")).hexdigest(),
+                ),
+            ),
+            generator_seed=seed,
+            root_seed=seed,
+            cell_key=hashlib.sha256(f"{self.null_id}|{source_id}".encode()).hexdigest()[
+                :16
+            ],
+            null_replicates=replicate + 1,
+            instrument="*",
+            block_length=None,
+            block_length_derivation=None,
+            row_plan=None,
+            max_iters=None,
+            converged=None,
+            iterations=None,
+            spectral_distance=None,
+            declaration=declaration,
+            authorized_by=AUTHORIZED_BY,
+            signal_bearing=False,
+            citable=False,
+            generated_label=GENERATED_LABEL,
+        )
         return SurrogateSeries(
             null_id=self.null_id,
             source_id=source_id,
             replicate=replicate,
             seed=seed,
             values=tuple(reordered),
+            provenance=provenance,
         )
 
 

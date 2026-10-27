@@ -35,6 +35,7 @@ __all__ = [
     "Descriptor",
     "Fill",
     "FitnessSample",
+    "GeneratorFunction",
     "Genome",
     "InstrumentId",
     "Intent",
@@ -50,6 +51,7 @@ __all__ = [
     "SegmentRole",
     "SizingOutcome",
     "Standing",
+    "SurrogateProvenance",
     "SurrogateSeries",
     "UtcTimestamp",
 ]
@@ -124,6 +126,44 @@ class Bar(_UtcTimestampMixin):
 
     def __post_init__(self) -> None:
         self._normalize_timestamps("period_start", "period_end")
+        figures = {
+            "open": self.open,
+            "high": self.high,
+            "low": self.low,
+            "close": self.close,
+            "volume": self.volume,
+        }
+        # Finiteness first: every ordering comparison with NaN is false, so a
+        # NaN bar would otherwise satisfy every relation below.
+        for name, figure in figures.items():
+            if not math.isfinite(figure):
+                raise ValueError(
+                    f"a bar's {name} must be finite, got {figure!r}: a bar is "
+                    "complete or absent, never filled"
+                )
+        for name in ("open", "high", "low", "close", "volume"):
+            if figures[name] <= 0:
+                raise ValueError(
+                    f"a bar's {name} must be greater than zero, got "
+                    f"{figures[name]!r}: a bar in which nothing traded is "
+                    "excluded by its source, never constructed"
+                )
+        for name, other in (
+            ("high", "low"),
+            ("high", "open"),
+            ("high", "close"),
+        ):
+            if figures[name] < figures[other]:
+                raise ValueError(
+                    f"a bar's {name} ({figures[name]!r}) must be at least its "
+                    f"{other} ({figures[other]!r})"
+                )
+        for name in ("open", "close"):
+            if figures["low"] > figures[name]:
+                raise ValueError(
+                    f"a bar's low ({figures['low']!r}) must be at most its "
+                    f"{name} ({figures[name]!r})"
+                )
 
 
 @dataclass(frozen=True)
@@ -783,12 +823,201 @@ class NullDeclaration:
         destroys: Properties of the real series the construction removes.
         hypothesis: The hypothesis a draw from this null tests — what it would
             mean for a real result to exceed the distribution it generates.
+        limitations: What the construction does not do, printed beside the
+            distribution it generates.
     """
 
     null_id: str
     preserves: tuple[str, ...]
     destroys: tuple[str, ...]
     hypothesis: str
+    limitations: tuple[str, ...] = ()
+
+
+#: The authority every generated series is drawn under.
+AUTHORIZED_BY = "V0B.5 / agent-ecology-governance-authorization.md"
+
+#: The label every generated series carries.
+GENERATED_LABEL = "Generated (authorized by Task V0B.5)"
+
+# The construction a surrogate was drawn by.
+type SurrogateMethod = Literal["stationary_bootstrap", "iaaft", "permutation"]
+
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _refuse_unless_lowercase_hex(name: str, value: str, length: int) -> None:
+    if len(value) != length or not set(value) <= _HEX_DIGITS:
+        raise ValueError(
+            f"{name} must be {length} lowercase hexadecimal characters, got {value!r}"
+        )
+
+
+@dataclass(frozen=True)
+class GeneratorFunction:
+    """A function that produced or shaped a draw, and the hash of its source text.
+
+    Attributes:
+        name: Fully qualified name of the function.
+        sha256: Lowercase hex sha256 of the function's source text, as UTF-8.
+    """
+
+    name: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        _refuse_unless_lowercase_hex(f"{self.name} sha256", self.sha256, 64)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurrogateProvenance(_UtcTimestampMixin):
+    """Where a draw came from, how it was made, and under what authority.
+
+    Attributes:
+        source_data_id: Register identity of the source series.
+        symbols: The source's symbols, sorted and unique.
+        period_first_bar: First bar of the source period (UTC).
+        period_last_bar: Last bar of the source period (UTC).
+        source_data_hash: Content hash of the source entry, lowercase sha256.
+        source_dataset_id: Ledger dataset the guard resolved for the read.
+        source_read_purpose: Purpose the booked read declared.
+        source_read_arm_id: Arm the booked read declared.
+        restart_indices: Window restarts of the source; strictly increasing,
+            beginning at zero.
+        method: The construction that made the draw.
+        generator_version: Installed version of the library that drew it.
+        generator_functions: Every function that shaped the draw, by name.
+        generator_seed: The integer actually given to the generating function.
+        root_seed: The run's root seed.
+        cell_key: Sixteen hex characters naming the cell the seed was derived in.
+        null_replicates: Size of the replicate budget the draw belongs to.
+        instrument: Instrument the seed was derived for; ``"*"`` for a plan
+            shared by every instrument.
+        block_length: Mean block length of a stationary bootstrap.
+        block_length_derivation: How that block length was derived.
+        row_plan: The rows of the pool a bootstrap drew, in order.
+        max_iters: Iteration ceiling of an iterative amplitude adjustment.
+        converged: Whether that adjustment stopped on its own criterion.
+        iterations: Iterations it ran.
+        spectral_distance: Distance between the source's and the draw's spectra.
+        declaration: The null this draw was made under.
+        authorized_by: The authority; must equal :data:`AUTHORIZED_BY`.
+        signal_bearing: Always false: a generated draw is no signal.
+        citable: Always false: a generated draw is no evidence.
+        generated_label: The label; must equal :data:`GENERATED_LABEL`.
+    """
+
+    source_data_id: str
+    symbols: tuple[str, ...]
+    period_first_bar: UtcTimestamp
+    period_last_bar: UtcTimestamp
+    source_data_hash: str
+    source_dataset_id: str
+    source_read_purpose: str
+    source_read_arm_id: str
+    restart_indices: tuple[int, ...]
+    method: SurrogateMethod
+    generator_version: str
+    generator_functions: tuple[GeneratorFunction, ...]
+    generator_seed: int
+    root_seed: int
+    cell_key: str
+    null_replicates: int
+    instrument: str
+    block_length: float | None
+    block_length_derivation: str | None
+    row_plan: tuple[int, ...] | None
+    max_iters: int | None
+    converged: bool | None
+    iterations: int | None
+    spectral_distance: float | None
+    declaration: NullDeclaration
+    authorized_by: str
+    signal_bearing: bool
+    citable: bool
+    generated_label: str
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps("period_first_bar", "period_last_bar")
+        _refuse_unless_lowercase_hex("source_data_hash", self.source_data_hash, 64)
+        _refuse_unless_lowercase_hex("cell_key", self.cell_key, 16)
+        if not self.generator_functions:
+            raise ValueError("generator_functions must name at least one function")
+        if not self.symbols or list(self.symbols) != sorted(set(self.symbols)):
+            raise ValueError("symbols must be non-empty, sorted and unique")
+        indices = self.restart_indices
+        if (
+            not indices
+            or indices[0] != 0
+            or any(
+                later <= earlier
+                for earlier, later in zip(indices, indices[1:], strict=False)
+            )
+        ):
+            raise ValueError(
+                "restart_indices must begin at 0 and be strictly increasing"
+            )
+        if self.null_replicates < 1:
+            raise ValueError("null_replicates must be at least 1")
+        if not self.instrument:
+            raise ValueError("instrument must be non-empty")
+        if not self.generator_version:
+            raise ValueError("generator_version must be non-empty")
+        if self.period_first_bar > self.period_last_bar:
+            raise ValueError("period_first_bar must not be after period_last_bar")
+        if self.authorized_by != AUTHORIZED_BY:
+            raise ValueError(f"authorized_by must equal {AUTHORIZED_BY!r}")
+        if self.generated_label != GENERATED_LABEL:
+            raise ValueError(f"generated_label must equal {GENERATED_LABEL!r}")
+        if self.signal_bearing is not False:
+            raise ValueError("signal_bearing must be False")
+        if self.citable is not False:
+            raise ValueError("citable must be False")
+        self._refuse_a_method_mismatch()
+
+    def _refuse_a_method_mismatch(self) -> None:
+        if self.method not in {"stationary_bootstrap", "iaaft", "permutation"}:
+            raise ValueError(f"unsupported surrogate method {self.method!r}")
+        bootstrap = {
+            "block_length": self.block_length,
+            "block_length_derivation": self.block_length_derivation,
+            "row_plan": self.row_plan,
+        }
+        iterative = {
+            "max_iters": self.max_iters,
+            "converged": self.converged,
+            "iterations": self.iterations,
+            "spectral_distance": self.spectral_distance,
+        }
+        if self.method == "stationary_bootstrap":
+            if self.block_length is None or not (
+                math.isfinite(self.block_length) and self.block_length >= 1
+            ):
+                raise ValueError("block_length must be finite and at least 1")
+            if not self.block_length_derivation:
+                raise ValueError("block_length_derivation must be non-empty")
+            if self.row_plan is None:
+                raise ValueError("row_plan must be present for a stationary bootstrap")
+            self._refuse_present(iterative)
+        elif self.method == "iaaft":
+            if self.max_iters is None or self.max_iters < 1:
+                raise ValueError("max_iters must be at least 1")
+            if not isinstance(self.converged, bool):
+                raise ValueError("converged must be a bool")
+            if self.iterations is None or not 1 <= self.iterations <= self.max_iters:
+                raise ValueError("iterations must lie between 1 and max_iters")
+            if self.spectral_distance is None or not (
+                math.isfinite(self.spectral_distance) and self.spectral_distance >= 0
+            ):
+                raise ValueError("spectral_distance must be finite and non-negative")
+            self._refuse_present(bootstrap)
+        else:
+            self._refuse_present(bootstrap | iterative)
+
+    def _refuse_present(self, fields: Mapping[str, object]) -> None:
+        for name, value in fields.items():
+            if value is not None:
+                raise ValueError(f"{name} must be None for method {self.method!r}")
 
 
 @dataclass(frozen=True)
@@ -802,6 +1031,8 @@ class SurrogateSeries:
         seed: Seed that reproduces this exact draw.
         values: The drawn observations, positionally aligned with the source
             series.
+        provenance: Where the draw came from and how it was made. A series
+            cannot be built without it.
     """
 
     null_id: str
@@ -809,6 +1040,25 @@ class SurrogateSeries:
     replicate: int
     seed: int
     values: tuple[float, ...]
+    provenance: SurrogateProvenance
+
+    def __post_init__(self) -> None:
+        if self.provenance.source_data_id != self.source_id:
+            raise ValueError(
+                "provenance source_data_id must equal source_id "
+                f"({self.provenance.source_data_id!r} != {self.source_id!r})"
+            )
+        if self.provenance.declaration.null_id != self.null_id:
+            raise ValueError(
+                "provenance declaration null_id must equal null_id "
+                f"({self.provenance.declaration.null_id!r} != {self.null_id!r})"
+            )
+        plan = self.provenance.row_plan
+        if plan is not None and len(plan) != len(self.values):
+            raise ValueError(
+                f"row_plan has {len(plan)} rows but the series has "
+                f"{len(self.values)} values"
+            )
 
 
 def _refuse_a_figure_that_is_not_finite(owner: str, **figures: float) -> None:

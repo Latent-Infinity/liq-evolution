@@ -400,6 +400,15 @@ class SurrogateSource(Protocol):
       be rebuilt from its record alone.
     * A draw is derived from the real series it is handed. Nothing here
       invents, imputes or extends data.
+    * Every draw carries its provenance, a required field of the series: the
+      source series it came from (identity, symbols, period, data hash, the
+      booked read), the method and the version and function hashes of the
+      generator, the seed it was given, the parameters of its method, the
+      declaration it was drawn under, and the authority it exists by. The
+      provenance names the same source and the same null as the series. A
+      generated draw is never signal-bearing and never citable.
+    * The declaration may state its limitations beside what it preserves and
+      destroys; they are read with the distribution the null generates.
     """
 
     def declaration(self) -> NullDeclaration:

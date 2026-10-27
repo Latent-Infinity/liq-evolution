@@ -323,8 +323,8 @@ def _substrate(*, closes: Sequence[float | None], log: RunLog) -> FeatureSubstra
                 period_start=period_start,
                 period_end=period_start + BAR_DURATION,
                 open=100.0,
-                high=101.0,
-                low=99.0,
+                high=101.0 if close is None else max(101.0, close),
+                low=99.0 if close is None else min(99.0, close),
                 close=close,
                 volume=1.0,
             )

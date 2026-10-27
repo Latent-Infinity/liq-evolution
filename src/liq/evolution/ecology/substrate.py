@@ -57,6 +57,7 @@ not look-ahead; only carrying it backward would be.
 
 from __future__ import annotations
 
+import hashlib
 from collections import deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -102,6 +103,9 @@ FEATURE_WARM_UP = "feature_warm_up"
 #: The fields a bar must carry to be complete. A record missing any of them
 #: describes a bar nobody saw.
 BAR_FIELDS = ("open", "high", "low", "close", "volume")
+
+#: How an instant is written into the records digest.
+_INSTANT_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 #: What a pass whose run declared no schedule calls the one segment it walks.
 #: A single undivided segment is a walk nobody split, which is a different thing
@@ -411,6 +415,11 @@ class SubstrateReport:
         window_carries_across_segments: Whether the rolling window survives a
             walk-forward split boundary.
         exclusions: Everything the pass did not compute, with its reason.
+        records_digest: Lowercase-hex sha256 of the rows the pass consumed, in
+            the order it consumed them, under the encoding
+            :func:`_encode_record` states. A row that was never complete enters
+            with its absent fields written as ``None``, so an excluded bar is
+            part of the digest as excluded rather than missing from it.
     """
 
     instruments: tuple[InstrumentId, ...]
@@ -420,6 +429,7 @@ class SubstrateReport:
     window_value_capacity: int
     window_carries_across_segments: bool
     exclusions: tuple[Exclusion, ...]
+    records_digest: str
 
 
 @dataclass
@@ -479,6 +489,9 @@ class FeatureSubstrate:
     _instruments: list[InstrumentId] = field(
         default_factory=list, init=False, repr=False
     )
+    _digest: hashlib._Hash = field(
+        default_factory=hashlib.sha256, init=False, repr=False
+    )
 
     @property
     def exclusions(self) -> tuple[Exclusion, ...]:
@@ -498,17 +511,20 @@ class FeatureSubstrate:
             window_value_capacity=capacity * len(BAR_FIELDS),
             window_carries_across_segments=self.window_carries_across_segments,
             exclusions=self.exclusions,
+            records_digest=self._digest.hexdigest(),
         )
 
     def windows(self) -> Iterator[BarWindow]:
         """Yield each decision point in chronological order, exactly once."""
         self._exclusions.clear()
         self._instruments.clear()
+        self._digest = hashlib.sha256()
         held: dict[InstrumentId, _Rolling] = {}
         for as_of, group in _by_decision_point(self.records):
             bars: dict[InstrumentId, Bar] = {}
             views: dict[InstrumentId, BroadcastFeatureView] = {}
             for record in group:
+                self._digest.update(_encode_record(record))
                 bar = record.completed()
                 if bar is None:
                     self._exclude_bar(record)
@@ -625,6 +641,26 @@ class FeatureSubstrate:
                     deferred[declaration.name] = available_at
                 break
         return BroadcastFeatureView(as_of=as_of, values=readable, deferred=deferred)
+
+
+def _encode_record(record: BarRecord) -> bytes:
+    """One row as the line the records digest is taken over.
+
+    The instrument, the period's start and end as UTC instants, then open, high,
+    low, close and volume, comma-separated and ended by a line feed. Each number
+    is the ``repr`` of a float and an absent one is the word ``None``. The
+    instants are written out in full so a row moved in time is a different row.
+    """
+    fields = (
+        record.instrument,
+        record.period_start.strftime(_INSTANT_FORMAT),
+        record.period_end.strftime(_INSTANT_FORMAT),
+        *(
+            "None" if value is None else repr(float(value))
+            for value in (getattr(record, name) for name in BAR_FIELDS)
+        ),
+    )
+    return (",".join(fields) + "\n").encode("utf-8")
 
 
 def _by_decision_point(

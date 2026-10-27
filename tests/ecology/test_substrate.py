@@ -9,6 +9,7 @@ its declaration says is not readable yet, and the report a pass hands back.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
@@ -429,3 +430,142 @@ def test_a_schedule_reports_the_segments_it_divides_a_walk_into() -> None:
     assert schedule.segments == (TRAIN_SEGMENT, VALIDATE_SEGMENT)
     assert schedule.at(records[0].period_end).segment_id == TRAIN_SEGMENT
     assert schedule.at(records[-1].period_end).segment_id == VALIDATE_SEGMENT
+
+
+def _encoded(records: Sequence[BarRecord]) -> str:
+    """The declared encoding of rows, written out a second time from its statement.
+
+    One line per row: the instrument, the period's two ends as UTC instants, then
+    the five bar fields, each a float's ``repr`` or the word ``None``, joined with
+    commas and each line ended by a line feed. Deliberately not a call into the
+    module, so the two can only agree by both following the declaration.
+    """
+
+    def text(value: float | None) -> str:
+        return "None" if value is None else repr(float(value))
+
+    lines = [
+        ",".join(
+            [
+                record.instrument,
+                record.period_start.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                record.period_end.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                *(text(getattr(record, name)) for name in BAR_FIELDS),
+            ]
+        )
+        + "\n"
+        for record in records
+    ]
+    return "".join(lines)
+
+
+def _digest_of(records: Sequence[BarRecord]) -> str:
+    """The digest a pass over ``records`` must report, from the statement alone."""
+    return hashlib.sha256(_encoded(records).encode("utf-8")).hexdigest()
+
+
+def _walked_digest(records: Sequence[BarRecord]) -> str:
+    """Walk a ramp substrate over ``records`` and read the digest it reports."""
+    substrate = ramp_bars.substrate(records)
+    list(substrate.windows())
+    return substrate.report().records_digest
+
+
+def _replaced(
+    records: Sequence[BarRecord], index: int, **changes: object
+) -> tuple[BarRecord, ...]:
+    """The rows with one of them changed in the named fields."""
+    row = records[index]
+    values = {
+        "instrument": row.instrument,
+        "period_start": row.period_start,
+        "period_end": row.period_end,
+        **{name: getattr(row, name) for name in BAR_FIELDS},
+        **changes,
+    }
+    return (*records[:index], BarRecord(**values), *records[index + 1 :])  # type: ignore[arg-type]
+
+
+def test_the_digest_is_the_sha256_of_the_declared_encoding() -> None:
+    """What is reported is the hash of the declared lines, not of anything near them."""
+    records = ramp_bars.as_records(ramp_bars.ramp_bars())
+    digest = _walked_digest(records)
+
+    assert digest == _digest_of(records)
+    assert len(digest) == 64
+    assert digest == digest.lower()
+
+
+def test_sources_identical_in_every_row_report_equal_digests() -> None:
+    """The digest is a function of the rows consumed and of nothing else."""
+    first = _walked_digest(ramp_bars.as_records(ramp_bars.ramp_bars()))
+    second = _walked_digest(ramp_bars.as_records(ramp_bars.ramp_bars()))
+
+    assert first == second
+
+
+@pytest.mark.parametrize("field", ["open", "high", "low", "close", "volume"])
+def test_changing_one_value_in_one_row_changes_the_digest(field: str) -> None:
+    """Every bar field is covered, so a transport of any one of them is seen."""
+    records = ramp_bars.as_records(ramp_bars.ramp_bars())
+    changed = _replaced(records, 5, **{field: getattr(records[5], field) + 0.5})
+
+    assert _walked_digest(changed) != _walked_digest(records)
+    assert _walked_digest(changed) == _digest_of(changed)
+
+
+def test_re_timing_a_row_changes_the_digest() -> None:
+    """The instants are part of what was consumed, not only the prices."""
+    records = ramp_bars.as_records(ramp_bars.ramp_bars())
+    shift = timedelta(seconds=1)
+    moved = _replaced(
+        records,
+        5,
+        period_start=records[5].period_start + shift,
+        period_end=records[5].period_end + shift,
+    )
+
+    assert _walked_digest(moved) != _walked_digest(records)
+    assert _walked_digest(moved) == _digest_of(moved)
+
+
+def test_an_excluded_row_enters_the_digest_as_excluded() -> None:
+    """A row with a field missing is neither dropped from the digest nor made whole."""
+    records = ramp_bars.as_records(ramp_bars.ramp_bars())
+    broken = (*records[:6], ramp_bars.without(records[6], "close"), *records[7:])
+    dropped = (*records[:6], *records[7:])
+
+    digest = _walked_digest(broken)
+    assert digest == _digest_of(broken)
+    assert "None" in _encoded(broken)
+    assert digest not in {_digest_of(records), _digest_of(dropped)}
+
+
+def test_the_digest_follows_the_order_the_rows_are_consumed() -> None:
+    """Rows of one decision point are consumed in the order they arrive."""
+    left = ramp_bars.as_records(ramp_bars.ramp_bars(instrument="LEFT"))
+    right = ramp_bars.as_records(ramp_bars.ramp_bars(instrument="RIGHT"))
+    interleaved = tuple(row for pair in zip(left, right, strict=True) for row in pair)
+    swapped = tuple(row for pair in zip(right, left, strict=True) for row in pair)
+
+    assert _walked_digest(interleaved) == _digest_of(interleaved)
+    assert _walked_digest(interleaved) != _walked_digest(swapped)
+
+
+def test_a_pass_over_no_rows_reports_the_digest_of_nothing() -> None:
+    """An empty walk consumed nothing, which is a digest of its own."""
+    substrate = ramp_bars.substrate(())
+
+    assert substrate.report().records_digest == _digest_of(())
+    list(substrate.windows())
+    assert substrate.report().records_digest == _digest_of(())
+
+
+def test_a_second_walk_does_not_accumulate_into_the_digest() -> None:
+    """Each pass reports the rows it consumed, never those of an earlier one."""
+    records = ramp_bars.as_records(ramp_bars.ramp_bars())
+    substrate = ramp_bars.substrate(records)
+    list(substrate.windows())
+    list(substrate.windows())
+
+    assert substrate.report().records_digest == _digest_of(records)

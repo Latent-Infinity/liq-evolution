@@ -83,7 +83,7 @@ FAMILY = Path(__file__).resolve().parents[1] / "fixtures/generated/ecology/two_r
 MANIFEST_SHA256 = "765f660192f0caad9aa85e5a6cfb41164def0cd56beb6cc803604a6219efc7ed"
 
 #: The horizon each stream of E cites, as its declaration implies. Source:
-#: Task V5.24's execution line, recomputed in
+#: The plan's execution line, recomputed in
 #: ``liq-docs/plans/oracle-v5-sufficiency-gaps-2026-10-15.md`` IV6. E05, E06
 #: and E08 cite none.
 DECLARED_HORIZONS = {"E01": 46, "E02": 23, "E03": 46, "E04": 23, "E07": 46}

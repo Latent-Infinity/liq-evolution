@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "liq-evolution"
-version = "0.9.0"
+version = "0.10.0"
 description = "Trading strategy evolution layer for the LIQ Stack"
 readme = "README.md"
 license = "MIT"

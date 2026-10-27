@@ -73,7 +73,9 @@ def _manifest_mismatches(tests_root: Path) -> list[str]:
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     found = []
     if manifest.get("authorized_by") != AUTHORIZED_BY:
-        found.append(f"{FAMILY_DIR / 'manifest.toml'}: authorized_by is not V5.2's")
+        found.append(
+            f"{FAMILY_DIR / 'manifest.toml'}: authorized_by is not the two-regime stream's authorization"
+        )
     recorded = {e["file"]: e["sha256"] for e in manifest.get("stream", [])}
     on_disk = {p.name for p in family.iterdir() if p.is_file()} - {"manifest.toml"}
     for name in sorted(on_disk):
@@ -191,7 +193,7 @@ def test_wrong_authorization_is_named(tree: Path) -> None:
     )
     assert label_violations(tree) == [
         "fixtures/generated/ecology/two_regime/manifest.toml: "
-        "authorized_by is not V5.2's"
+        "authorized_by is not the two-regime stream's authorization"
     ]
 
 
